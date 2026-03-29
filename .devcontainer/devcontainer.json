@@ -4,6 +4,7 @@
   "service": "workspace",
   "runServices": ["postgres", "minio", "workspace", "browser"],
   "workspaceFolder": "/workspaces/harness-kanban",
+  "remoteUser": "node",
   "shutdownAction": "stopCompose",
   "postCreateCommand": "bash .devcontainer/scripts/setup-devcontainer.sh",
   "forwardPorts": [3000, 3001, 3100, 3101, 6006],

@@ -2,11 +2,15 @@ name: harness-kanban
 
 services:
   workspace:
-    image: mcr.microsoft.com/devcontainers/javascript-node:22
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: sleep infinity
     working_dir: /workspaces/harness-kanban
+    privileged: true
     volumes:
       - ..:/workspaces/harness-kanban:cached
+      - docker_data:/var/lib/docker
     env_file:
       - ./workspace.env
     depends_on:
@@ -51,5 +55,6 @@ services:
 
 volumes:
   browser_config:
+  docker_data:
   postgres_data:
   minio_data:

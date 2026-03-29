@@ -23,6 +23,15 @@ pnpm_cmd() {
   fi
 }
 
+devpod_cmd() {
+  if command -v devpod >/dev/null 2>&1; then
+    devpod "$@"
+  else
+    echo "DevPod CLI is not installed." >&2
+    return 1
+  fi
+}
+
 run_as_root() {
   if [[ "$(id -u)" -eq 0 ]]; then
     "$@"
@@ -86,6 +95,84 @@ wait_for_tcp() {
   return 1
 }
 
+wait_for_docker() {
+  local max_attempts="${DEVCONTAINER_DOCKER_READY_MAX_ATTEMPTS:-30}"
+  local retry_delay="${DEVCONTAINER_DOCKER_READY_RETRY_DELAY_SECONDS:-2}"
+  local attempt=1
+
+  echo "Waiting for Docker daemon inside the dev container..."
+  until docker info >/dev/null 2>&1; do
+    if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+      echo "Docker daemon is not reachable after ${attempt} attempts." >&2
+      return 1
+    fi
+
+    echo "Docker is not ready yet (attempt ${attempt}/${max_attempts}); retrying..."
+    attempt=$((attempt + 1))
+    sleep "${retry_delay}"
+  done
+
+  echo "Docker daemon is ready."
+}
+
+resolve_devpod_download_url() {
+  local version="${DEVPOD_VERSION:-latest}"
+  local arch
+
+  case "$(uname -m)" in
+    x86_64|amd64)
+      arch="amd64"
+      ;;
+    aarch64|arm64)
+      arch="arm64"
+      ;;
+    *)
+      echo "Unsupported architecture for DevPod CLI: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "${version}" == "latest" ]]; then
+    printf 'https://github.com/loft-sh/devpod/releases/latest/download/devpod-linux-%s' "${arch}"
+  else
+    printf 'https://github.com/loft-sh/devpod/releases/download/%s/devpod-linux-%s' "${version}" "${arch}"
+  fi
+}
+
+install_devpod_cli() {
+  if command -v devpod >/dev/null 2>&1; then
+    echo "DevPod CLI is already installed: $(devpod version | head -n 1)"
+    return 0
+  fi
+
+  local download_url tmp_file
+  download_url="$(resolve_devpod_download_url)"
+  tmp_file="$(mktemp)"
+
+  echo "Installing DevPod CLI from ${download_url}..."
+  curl -fsSL -o "${tmp_file}" "${download_url}"
+
+  if ! run_as_root install -c -m 0755 "${tmp_file}" /usr/local/bin/devpod; then
+    rm -f "${tmp_file}"
+    echo "Failed to install DevPod CLI into /usr/local/bin." >&2
+    return 1
+  fi
+
+  rm -f "${tmp_file}"
+  echo "Installed DevPod CLI: $(devpod version | head -n 1)"
+}
+
+configure_devpod_provider() {
+  echo "Configuring DevPod docker provider..."
+
+  if ! devpod_cmd provider use docker -o DOCKER_PATH=docker >/dev/null 2>&1; then
+    devpod_cmd provider add docker -o DOCKER_PATH=docker >/dev/null
+    devpod_cmd provider use docker -o DOCKER_PATH=docker >/dev/null
+  fi
+
+  echo "DevPod docker provider is ready."
+}
+
 write_env_files() {
   echo "Writing development .env files..."
 
@@ -135,6 +222,9 @@ main() {
   cd "${REPO_ROOT}"
 
   write_env_files
+  install_devpod_cli
+  wait_for_docker
+  configure_devpod_provider
   ensure_workspace_node_modules_writable
 
   echo "Installing workspace dependencies..."
