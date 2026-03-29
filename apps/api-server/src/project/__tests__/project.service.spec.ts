@@ -43,6 +43,10 @@ describe('ProjectService', () => {
         url: 'https://example.com/mcp',
       },
     }
+    const envConfig = {
+      ' API_BASE_URL ': ' https://api.example.com ',
+      DEBUG: ' true ',
+    }
     ;(prismaService.client.project.create as jest.Mock).mockResolvedValue({
       id: 'project-1',
       workspace_id: workspaceId,
@@ -52,6 +56,10 @@ describe('ProjectService', () => {
       check_ci_cd: true,
       preview_commands: ['pnpm install', 'pnpm dev'],
       mcp_config: mcpConfig,
+      env_config: {
+        API_BASE_URL: 'https://api.example.com',
+        DEBUG: 'true',
+      },
       created_by: userId,
       created_at: new Date('2026-03-11T00:00:00Z'),
       updated_at: new Date('2026-03-11T00:00:00Z'),
@@ -64,6 +72,7 @@ describe('ProjectService', () => {
       checkCiCd: true,
       previewCommands: [' pnpm install ', 'pnpm dev  '],
       mcpConfig,
+      envConfig,
     })
 
     expect(prismaService.client.project.create).toHaveBeenCalledWith({
@@ -75,6 +84,10 @@ describe('ProjectService', () => {
         check_ci_cd: true,
         preview_commands: ['pnpm install', 'pnpm dev'],
         mcp_config: mcpConfig,
+        env_config: {
+          API_BASE_URL: 'https://api.example.com',
+          DEBUG: 'true',
+        },
         created_by: userId,
       },
     })
@@ -130,6 +143,10 @@ describe('ProjectService', () => {
           },
         },
       },
+      env_config: {
+        API_BASE_URL: 'https://staging.example.com',
+        DEBUG: '0',
+      },
       created_by: userId,
       created_at: new Date('2026-03-11T00:00:00Z'),
       updated_at: new Date('2026-03-11T01:00:00Z'),
@@ -148,6 +165,10 @@ describe('ProjectService', () => {
             DEBUG: '1',
           },
         },
+      },
+      envConfig: {
+        ' API_BASE_URL ': ' https://staging.example.com ',
+        DEBUG: ' 0 ',
       },
     })
 
@@ -168,6 +189,10 @@ describe('ProjectService', () => {
               DEBUG: '1',
             },
           },
+        },
+        env_config: {
+          API_BASE_URL: 'https://staging.example.com',
+          DEBUG: '0',
         },
       },
     })
@@ -204,6 +229,42 @@ describe('ProjectService', () => {
       },
       data: {
         mcp_config: Prisma.DbNull,
+      },
+    })
+  })
+
+  it('clears stored env config when the update payload sends null', async () => {
+    authService.checkUserPermission.mockResolvedValue(true)
+    ;(prismaService.client.project.findFirst as jest.Mock).mockResolvedValue({
+      id: 'project-1',
+      workspace_id: workspaceId,
+      deleted_at: null,
+    })
+    ;(prismaService.client.project.update as jest.Mock).mockResolvedValue({
+      id: 'project-1',
+      workspace_id: workspaceId,
+      name: 'Payments API',
+      github_repo_url: 'https://github.com/harness-kanban/payments-api',
+      repo_base_branch: 'main',
+      check_ci_cd: true,
+      preview_commands: ['pnpm dev'],
+      mcp_config: null,
+      env_config: null,
+      created_by: userId,
+      created_at: new Date('2026-03-11T00:00:00Z'),
+      updated_at: new Date('2026-03-11T01:00:00Z'),
+    })
+
+    await service.updateProject(workspaceId, userId, 'project-1', {
+      envConfig: null,
+    })
+
+    expect(prismaService.client.project.update).toHaveBeenCalledWith({
+      where: {
+        id: 'project-1',
+      },
+      data: {
+        env_config: Prisma.DbNull,
       },
     })
   })

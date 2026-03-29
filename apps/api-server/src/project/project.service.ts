@@ -5,9 +5,12 @@ import { Prisma } from '@repo/database'
 import { normalizeGithubRepoUrl } from '@repo/shared'
 import {
   CreateProjectInput,
+  normalizeProjectEnvConfig,
   normalizeProjectMcpConfig,
+  parseProjectEnvConfig,
   parseProjectMcpConfig,
   ProjectDetail,
+  ProjectEnvConfig,
   ProjectMcpConfig,
   ProjectSummary,
   UpdateProjectInput,
@@ -82,6 +85,7 @@ export class ProjectService {
         check_ci_cd: normalizedInput.checkCiCd,
         preview_commands: normalizedInput.previewCommands,
         mcp_config: this.serializeProjectMcpConfig(normalizedInput.mcpConfig),
+        env_config: this.serializeProjectEnvConfig(normalizedInput.envConfig),
         created_by: userId,
       },
     })
@@ -171,6 +175,7 @@ export class ProjectService {
     check_ci_cd: boolean
     preview_commands: unknown
     mcp_config: unknown
+    env_config: unknown
     created_by: string
     created_at: Date
     updated_at: Date
@@ -180,6 +185,7 @@ export class ProjectService {
       workspaceId: project.workspace_id,
       createdBy: project.created_by,
       mcpConfig: parseProjectMcpConfig(project.mcp_config),
+      envConfig: parseProjectEnvConfig(project.env_config),
     }
   }
 
@@ -190,6 +196,7 @@ export class ProjectService {
     checkCiCd: boolean
     previewCommands: string[]
     mcpConfig: ProjectMcpConfig | null
+    envConfig: ProjectEnvConfig | null
   } {
     return {
       name: this.normalizeName(input.name),
@@ -198,6 +205,7 @@ export class ProjectService {
       checkCiCd: Boolean(input.checkCiCd),
       previewCommands: this.normalizePreviewCommands(input.previewCommands),
       mcpConfig: normalizeProjectMcpConfig(input.mcpConfig),
+      envConfig: normalizeProjectEnvConfig(input.envConfig),
     }
   }
 
@@ -206,12 +214,14 @@ export class ProjectService {
     check_ci_cd?: boolean
     preview_commands?: string[]
     mcp_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
+    env_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
   } {
     const data: {
       name?: string
       check_ci_cd?: boolean
       preview_commands?: string[]
       mcp_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
+      env_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
     } = {}
 
     if ('name' in input && input.name !== undefined) {
@@ -225,6 +235,9 @@ export class ProjectService {
     }
     if ('mcpConfig' in input) {
       data.mcp_config = this.serializeProjectMcpConfig(input.mcpConfig ?? null)
+    }
+    if ('envConfig' in input) {
+      data.env_config = this.serializeProjectEnvConfig(input.envConfig ?? null)
     }
 
     return data
@@ -300,6 +313,18 @@ export class ProjectService {
     config: ProjectMcpConfig | null | undefined,
   ): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue {
     const normalizedConfig = normalizeProjectMcpConfig(config)
+    if (!normalizedConfig) {
+      return Prisma.DbNull
+    }
+
+    return normalizedConfig as unknown as Prisma.InputJsonValue
+  }
+
+  private serializeProjectEnvConfig(
+    config: ProjectEnvConfig | null | undefined,
+  ): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue {
+    // TODO: Store project environment variables with proper secret protection instead of plain JSON.
+    const normalizedConfig = normalizeProjectEnvConfig(config)
     if (!normalizedConfig) {
       return Prisma.DbNull
     }

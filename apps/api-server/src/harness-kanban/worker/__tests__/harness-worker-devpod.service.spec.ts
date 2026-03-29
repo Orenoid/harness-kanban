@@ -53,6 +53,7 @@ describe('HarnessWorkerDevpodService', () => {
   it('returns null when GITHUB_TOKEN is missing', async () => {
     findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
     findProjectMock.mockResolvedValue({
+      env_config: null,
       github_repo_url: 'https://github.com/harness-kanban/payments-api',
       mcp_config: null,
       repo_base_branch: 'main',
@@ -65,6 +66,7 @@ describe('HarnessWorkerDevpodService', () => {
   it('returns null when CODEX_AUTH_JSON is missing', async () => {
     findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
     findProjectMock.mockResolvedValue({
+      env_config: null,
       github_repo_url: 'https://github.com/harness-kanban/payments-api',
       mcp_config: null,
       repo_base_branch: 'main',
@@ -125,6 +127,10 @@ describe('HarnessWorkerDevpodService', () => {
 
     findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
     findProjectMock.mockResolvedValue({
+      env_config: {
+        API_BASE_URL: 'https://api.example.com',
+        DEBUG: 'true',
+      },
       github_repo_url: 'git@github.com:harness-kanban/payments-api.git',
       mcp_config: {
         docs: {
@@ -337,6 +343,10 @@ describe('HarnessWorkerDevpodService', () => {
         '--configure-ssh=false',
         '--fallback-image',
         'mcr.microsoft.com/devcontainers/base:ubuntu',
+        '--workspace-env',
+        'API_BASE_URL=https://api.example.com',
+        '--workspace-env',
+        'DEBUG=true',
       ],
       expect.objectContaining({
         env: expect.objectContaining({

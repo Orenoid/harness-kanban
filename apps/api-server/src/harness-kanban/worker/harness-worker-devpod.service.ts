@@ -9,7 +9,13 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@repo/database'
 import { normalizeGithubRepoUrl } from '@repo/shared'
-import { parseProjectMcpConfig, ProjectMcpConfig, ProjectMcpServerConfig } from '@repo/shared/project/types'
+import {
+  parseProjectEnvConfig,
+  parseProjectMcpConfig,
+  ProjectEnvConfig,
+  ProjectMcpConfig,
+  ProjectMcpServerConfig,
+} from '@repo/shared/project/types'
 import { SystemPropertyId } from '@repo/shared/property/constants'
 import { resolveCodexAuthJson } from './harness-worker-codex-auth'
 import { HarnessWorkerToolchainService } from './harness-worker-toolchain.service'
@@ -29,6 +35,7 @@ type WorkspaceCommandOptions = {
 }
 
 type IssueProjectRepository = {
+  envConfig: ProjectEnvConfig | null
   githubRepoUrl: string
   mcpConfig: ProjectMcpConfig | null
   projectId: string
@@ -209,6 +216,7 @@ export class HarnessWorkerDevpodService {
       this.configService.get<string>('DEVPOD_FALLBACK_IMAGE')?.trim() || DEFAULT_DEVPOD_FALLBACK_IMAGE
     const source = this.buildWorkspaceSource(cloneUrl, repository.repoBaseBranch)
     const env = this.buildDevpodEnv(dockerConfigDirectory.path, gitConfigFile.path)
+    const workspaceEnvArgs = this.buildWorkspaceEnvArgs(repository.envConfig)
 
     try {
       this.logger.log(`Creating DevPod workspace ${workspaceName} for issue ${issueId}`)
@@ -227,6 +235,7 @@ export class HarnessWorkerDevpodService {
           '--configure-ssh=false',
           '--fallback-image',
           fallbackImage,
+          ...workspaceEnvArgs,
         ],
         {
           env,
@@ -335,6 +344,7 @@ export class HarnessWorkerDevpodService {
         deleted_at: null,
       },
       select: {
+        env_config: true,
         github_repo_url: true,
         mcp_config: true,
         repo_base_branch: true,
@@ -347,6 +357,7 @@ export class HarnessWorkerDevpodService {
 
     return {
       projectId,
+      envConfig: parseProjectEnvConfig(project.env_config),
       githubRepoUrl: project.github_repo_url,
       mcpConfig: parseProjectMcpConfig(project.mcp_config),
       repoBaseBranch: project.repo_base_branch,
@@ -567,6 +578,19 @@ export class HarnessWorkerDevpodService {
 
   private buildWorkspaceSource(githubRepoUrl: string, repoBaseBranch: string): string {
     return `git:${githubRepoUrl}@${repoBaseBranch}`
+  }
+
+  private buildWorkspaceEnvArgs(envConfig: ProjectEnvConfig | null): string[] {
+    if (!envConfig) {
+      return []
+    }
+
+    // TODO: Replace plain-text project env propagation with secure secret handling before production use.
+    // TODO: DevPod `--workspace-env` currently makes these variables visible to `devpod ssh` commands and the child
+    // processes they spawn, but not to arbitrary container processes such as `docker exec` sessions or long-running
+    // services. Revisit this when DevPod offers a container-wide env injection path that does not require mutating a
+    // user project's devcontainer configuration.
+    return Object.entries(envConfig).flatMap(([key, value]) => ['--workspace-env', `${key}=${value}`])
   }
 
   private normalizeCloneUrl(githubRepoUrl: string): string {

@@ -13,6 +13,7 @@ const project: ProjectDetail = {
   checkCiCd: true,
   previewCommands: ['pnpm install', 'pnpm dev'],
   mcpConfig: null,
+  envConfig: null,
   workspaceId: 'workspace-123',
   createdBy: 'user-1',
   createdAt: '2026-03-11T00:00:00Z',

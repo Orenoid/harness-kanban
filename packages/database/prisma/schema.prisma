@@ -105,6 +105,7 @@ model project {
   check_ci_cd      Boolean   @default(false)
   preview_commands Json?
   mcp_config       Json?
+  env_config       Json?
   created_by       String
   created_at       DateTime  @default(now())
   updated_at       DateTime  @updatedAt

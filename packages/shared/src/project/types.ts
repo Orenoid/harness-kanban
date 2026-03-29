@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 const projectMcpServerNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const projectEnvVarNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 export const projectMcpStreamableHttpServerSchema = z
   .object({
@@ -38,6 +39,45 @@ export const projectMcpConfigSchema = z.record(z.string(), projectMcpServerSchem
 
 export type ProjectMcpServerConfig = z.infer<typeof projectMcpServerSchema>
 export type ProjectMcpConfig = z.infer<typeof projectMcpConfigSchema>
+
+export const projectEnvConfigSchema = z.record(z.string(), z.string()).superRefine((config, ctx) => {
+  const normalizedNames = new Set<string>()
+
+  for (const name of Object.keys(config)) {
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Environment variable names must not be empty.',
+        path: [name],
+      })
+      continue
+    }
+
+    if (!projectEnvVarNamePattern.test(trimmedName)) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'Environment variable names must start with a letter or underscore and contain only letters, numbers, or underscores.',
+        path: [name],
+      })
+      continue
+    }
+
+    if (normalizedNames.has(trimmedName)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Environment variable names must be unique after trimming whitespace.',
+        path: [name],
+      })
+      continue
+    }
+
+    normalizedNames.add(trimmedName)
+  }
+})
+
+export type ProjectEnvConfig = z.infer<typeof projectEnvConfigSchema>
 
 export const normalizeProjectMcpConfig = (config: ProjectMcpConfig | null | undefined): ProjectMcpConfig | null => {
   if (!config) {
@@ -95,6 +135,35 @@ export const parseProjectMcpConfig = (value: unknown): ProjectMcpConfig | null =
   return normalizeProjectMcpConfig(parsed.data)
 }
 
+export const normalizeProjectEnvConfig = (config: ProjectEnvConfig | null | undefined): ProjectEnvConfig | null => {
+  if (!config) {
+    return null
+  }
+
+  const entries = Object.entries(config)
+    .map(([name, value]) => [name.trim(), value.trim()] as const)
+    .filter(([name]) => name.length > 0)
+
+  if (entries.length === 0) {
+    return null
+  }
+
+  return Object.fromEntries(entries.sort(([leftName], [rightName]) => leftName.localeCompare(rightName)))
+}
+
+export const parseProjectEnvConfig = (value: unknown): ProjectEnvConfig | null => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  const parsed = projectEnvConfigSchema.safeParse(value)
+  if (!parsed.success) {
+    return null
+  }
+
+  return normalizeProjectEnvConfig(parsed.data)
+}
+
 export interface ProjectSummary {
   id: string
   name: string
@@ -110,6 +179,7 @@ export interface ProjectDetail extends ProjectSummary {
   workspaceId: string
   createdBy: string
   mcpConfig: ProjectMcpConfig | null
+  envConfig: ProjectEnvConfig | null
 }
 
 export interface CreateProjectInput {
@@ -119,6 +189,7 @@ export interface CreateProjectInput {
   checkCiCd?: boolean
   previewCommands?: string[]
   mcpConfig?: ProjectMcpConfig
+  envConfig?: ProjectEnvConfig
 }
 
 export interface UpdateProjectInput {
@@ -126,6 +197,7 @@ export interface UpdateProjectInput {
   checkCiCd?: boolean
   previewCommands?: string[]
   mcpConfig?: ProjectMcpConfig | null
+  envConfig?: ProjectEnvConfig | null
 }
 
 export interface GetProjectsResponseDto {

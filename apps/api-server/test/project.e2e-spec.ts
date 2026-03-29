@@ -2,7 +2,7 @@ import { AppModule } from '@/app.module'
 import { ApiExceptionFilter } from '@/common/filters/api-exception.filter'
 import { INestApplication } from '@nestjs/common'
 import { Test, TestingModule } from '@nestjs/testing'
-import { ProjectMcpConfig } from '@repo/shared/project/types'
+import { ProjectEnvConfig, ProjectMcpConfig } from '@repo/shared/project/types'
 import { CommonPropertyOperationType, FilterOperator, SystemPropertyId } from '@repo/shared/property/constants'
 import { loginUser, SupertestAgent } from './utils/auth-helper'
 
@@ -13,6 +13,7 @@ type ProjectRecord = {
   repoBaseBranch: string
   checkCiCd: boolean
   mcpConfig: ProjectMcpConfig | null
+  envConfig: ProjectEnvConfig | null
   previewCommands: string[]
 }
 
@@ -60,6 +61,10 @@ describe('Project (e2e)', () => {
         },
       },
     }
+    const envConfig: ProjectEnvConfig = {
+      API_BASE_URL: `https://api.example.com/${suffix}`,
+      DEBUG: 'true',
+    }
     const createResponse = await agent
       .post('/api/v1/projects')
       .send({
@@ -70,6 +75,7 @@ describe('Project (e2e)', () => {
           checkCiCd: true,
           previewCommands: ['pnpm install', 'pnpm dev'],
           mcpConfig,
+          envConfig,
         },
       })
       .expect(201)
@@ -77,6 +83,7 @@ describe('Project (e2e)', () => {
     const project = createResponse.body.data.project as ProjectRecord
     expect(project.githubRepoUrl).toBe(`https://github.com/harness-kanban/payments-api-${suffix}`)
     expect(project.mcpConfig).toEqual(mcpConfig)
+    expect(project.envConfig).toEqual(envConfig)
     expect(project.previewCommands).toEqual(['pnpm install', 'pnpm dev'])
 
     const listResponse = await agent.get('/api/v1/projects').expect(200)
@@ -93,6 +100,7 @@ describe('Project (e2e)', () => {
           name: `Payments API ${suffix} Updated`,
           checkCiCd: false,
           mcpConfig: null,
+          envConfig: null,
           previewCommands: ['pnpm dev'],
         },
       })
@@ -103,6 +111,7 @@ describe('Project (e2e)', () => {
     expect(updatedProject.checkCiCd).toBe(false)
     expect(updatedProject.githubRepoUrl).toBe(`https://github.com/harness-kanban/payments-api-${suffix}`)
     expect(updatedProject.mcpConfig).toBeNull()
+    expect(updatedProject.envConfig).toBeNull()
 
     await agent
       .put(`/api/v1/projects/${project.id}`)

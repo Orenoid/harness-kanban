@@ -52,6 +52,7 @@ export const createProjectDetailHandler = ({
       ...baseProject,
       workspaceId: 'workspace-123',
       createdBy: 'user-1',
+      envConfig: null,
       mcpConfig: null,
     } satisfies ProjectDetail
   })(),
