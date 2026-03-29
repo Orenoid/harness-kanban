@@ -14,7 +14,6 @@ import { EventEmitterModule } from '@nestjs/event-emitter'
 import { AuthModule as BetterAuthNestModule } from '@thallesp/nestjs-better-auth'
 import { AgentModule } from './agent/agent.module.js'
 import { getAuth } from './auth/auth.js'
-import { OpenApiModule } from './openapi/openapi.module.js'
 
 @Module({
   imports: [
@@ -32,7 +31,6 @@ import { OpenApiModule } from './openapi/openapi.module.js'
     NotificationModule,
     UserModule,
     UserApiModule,
-    OpenApiModule,
     AgentModule,
     BetterAuthNestModule.forRootAsync({
       useFactory: async () => {

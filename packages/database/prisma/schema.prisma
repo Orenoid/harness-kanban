@@ -162,20 +162,6 @@ model comment {
   @@map("comment")
 }
 
-model api_key {
-  id           String    @id @default(uuid())
-  name         String?
-  hashed_key   String    @unique
-  prefix       String    @unique
-  created_by   String
-  last_used_at DateTime?
-  expires_at   DateTime?
-  created_at   DateTime  @default(now())
-
-  @@index([created_by])
-  @@map("api_key")
-}
-
 model subscription {
   id           String    @id @default(uuid())  // subscription id
   user_id      String                          // user who subscribed
