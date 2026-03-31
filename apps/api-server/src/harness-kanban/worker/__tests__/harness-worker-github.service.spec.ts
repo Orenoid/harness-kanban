@@ -67,15 +67,26 @@ describe('HarnessWorkerGithubService', () => {
         issueId: 101,
         workspaceId: 'workspace-1',
         branchName: 'code-bot/issue-101-plan',
-        issueTitle: 'Planning workflow',
+        pullRequestTitle: 'Plan issue 101: Planning workflow',
+        pullRequestBody: 'Create the technical plan and keep the rollout small.',
       }),
     ).resolves.toEqual({
       number: 17,
       url: 'https://github.com/harness-kanban/payments-api/pull/17',
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[0]?.[0]).toContain('head=harness-kanban%3Acode-bot%2Fissue-101-plan')
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://api.github.com/repos/harness-kanban/payments-api/pulls/17')
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: 'Plan issue 101: Planning workflow',
+          body: 'Create the technical plan and keep the rollout small.',
+        }),
+      }),
+    )
   })
 
   it('creates a new draft pull request when the branch has no open PR', async () => {
@@ -97,7 +108,8 @@ describe('HarnessWorkerGithubService', () => {
         issueId: 101,
         workspaceId: 'workspace-1',
         branchName: 'code-bot/issue-101-plan',
-        issueTitle: 'Planning workflow',
+        pullRequestTitle: 'Plan issue 101: Planning workflow',
+        pullRequestBody: 'Create the technical plan and keep the rollout small.',
       }),
     ).resolves.toEqual({
       number: 18,
@@ -110,10 +122,10 @@ describe('HarnessWorkerGithubService', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          title: 'Technical plan for issue #101: Planning workflow',
+          title: 'Plan issue 101: Planning workflow',
           head: 'code-bot/issue-101-plan',
           base: 'main',
-          body: 'Technical planning branch for issue #101.\n\nThis draft PR was created by Code Bot automation after generating technical_plan.md.',
+          body: 'Create the technical plan and keep the rollout small.',
           draft: true,
         }),
       }),
@@ -278,6 +290,103 @@ describe('HarnessWorkerGithubService', () => {
       reviewComments: [],
       issueComments: [],
     })
+  })
+
+  it('creates a ready-for-review pull request using the AI-authored title and body', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          number: 24,
+          html_url: 'https://github.com/harness-kanban/payments-api/pull/24',
+        }),
+      })
+
+    await expect(
+      service.ensureReadyForReviewPullRequest({
+        issueId: 101,
+        workspaceId: 'workspace-1',
+        branchName: 'code-bot/issue-101',
+        pullRequestTitle: 'feat(worker): implement planning workflow',
+        pullRequestBody: '## Summary\n- implement the approved workflow',
+      }),
+    ).resolves.toEqual({
+      number: 24,
+      url: 'https://github.com/harness-kanban/payments-api/pull/24',
+    })
+
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          title: 'feat(worker): implement planning workflow',
+          head: 'code-bot/issue-101',
+          base: 'main',
+          body: '## Summary\n- implement the approved workflow',
+          draft: false,
+        }),
+      }),
+    )
+  })
+
+  it('updates an existing draft implementation pull request before marking it ready for review', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            number: 25,
+            html_url: 'https://github.com/harness-kanban/payments-api/pull/25',
+            draft: true,
+            head: { ref: 'code-bot/issue-101' },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          number: 25,
+          html_url: 'https://github.com/harness-kanban/payments-api/pull/25',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          number: 25,
+          html_url: 'https://github.com/harness-kanban/payments-api/pull/25',
+        }),
+      })
+
+    await expect(
+      service.ensureReadyForReviewPullRequest({
+        issueId: 101,
+        workspaceId: 'workspace-1',
+        branchName: 'code-bot/issue-101',
+        pullRequestTitle: 'feat(worker): implement planning workflow',
+        pullRequestBody: '## Summary\n- implement the approved workflow',
+      }),
+    ).resolves.toEqual({
+      number: 25,
+      url: 'https://github.com/harness-kanban/payments-api/pull/25',
+    })
+
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://api.github.com/repos/harness-kanban/payments-api/pulls/25')
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: 'feat(worker): implement planning workflow',
+          body: '## Summary\n- implement the approved workflow',
+        }),
+      }),
+    )
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      'https://api.github.com/repos/harness-kanban/payments-api/pulls/25/ready_for_review',
+    )
   })
 
   it('recognizes an implementation pull request by issue reference even without the default title template', async () => {

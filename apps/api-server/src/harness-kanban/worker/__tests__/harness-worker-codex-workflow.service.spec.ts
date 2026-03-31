@@ -202,7 +202,8 @@ describe('HarnessWorkerCodexWorkflowService', () => {
   it('starts planning by running Codex and submitting the technical plan PR for review', async () => {
     codexRunnerService.runCodexWithSchema.mockResolvedValue({
       threadId: 'thread-1',
-      finalMessage: '{"action":"submit_plan","branch_name":"code-bot/issue-101-plan"}',
+      finalMessage:
+        '{"action":"submit_plan","comment":"Please review the technical plan.","branch_name":"code-bot/issue-101-plan","pr_title":"Plan issue 101: Planning workflow","pr_body":"Create the technical plan and keep the rollout small."}',
     })
 
     await service.startPlanning({
@@ -215,6 +216,29 @@ describe('HarnessWorkerCodexWorkflowService', () => {
     expect(codexRunnerService.runCodexWithSchema).toHaveBeenCalledWith(
       expect.objectContaining({
         issueId: 101,
+        outputJsonSchema: expect.objectContaining({
+          description: expect.stringContaining(
+            'you must author the draft pull request title and body yourself and return them in this JSON response',
+          ),
+          required: ['action', 'comment', 'branch_name', 'pr_title', 'pr_body'],
+          properties: expect.objectContaining({
+            action: expect.objectContaining({
+              description: expect.stringContaining("Use 'ask_questions' only when clarification is required"),
+            }),
+            comment: expect.objectContaining({
+              description: expect.stringContaining("For 'ask_questions', write the clarification question"),
+            }),
+            branch_name: expect.objectContaining({
+              description: expect.stringContaining("For 'submit_plan', return the technical plan branch name"),
+            }),
+            pr_title: expect.objectContaining({
+              description: expect.stringContaining("For 'submit_plan', return the draft pull request title"),
+            }),
+            pr_body: expect.objectContaining({
+              description: expect.stringContaining('Follow any user or repository pull request template when present'),
+            }),
+          }),
+        }),
         repoRoot: '/workspaces/harness-kanban-issue-101',
         resumeThreadId: undefined,
         workflowLabel: 'planning',
@@ -225,11 +249,42 @@ describe('HarnessWorkerCodexWorkflowService', () => {
     expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
       'finish the planning task for the assigned issue',
     )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'If the repository defines a branch naming convention in AGENTS.md, CLAUDE.md, or other repository guidance, follow that convention.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'Otherwise, name the branch using the format <type>/<short-description>.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'Even during the planning phase, name the branch for the actual change being planned or implemented, not as a generic plan branch.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'use the same language the user used in the issue details and comments for both fields.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'If the user or repository provides a pull request template, follow that template.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'If the user or repository specifies a commit message convention, follow it. Otherwise, use Conventional Commits.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'You must author the pull request title and body yourself',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'The system will place the pull request URL on the first line and then append your comment below it.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      '"comment":"optional-issue-comment","branch_name":"your-branch-name","pr_title":"your-pr-title","pr_body":"your-pr-body"',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      "avoid '#<issueId>' because it can be confused with GitHub issue references; use a natural-language reference such as 'issue 123' instead.",
+    )
     expect(githubService.ensureDraftPullRequest).toHaveBeenCalledWith({
       issueId: 101,
       workspaceId: 'workspace-1',
       branchName: 'code-bot/issue-101-plan',
-      issueTitle: 'Planning workflow',
+      pullRequestTitle: 'Plan issue 101: Planning workflow',
+      pullRequestBody: 'Create the technical plan and keep the rollout small.',
     })
     expect(issueService.updateIssue).toHaveBeenCalledWith(
       {
@@ -254,7 +309,7 @@ describe('HarnessWorkerCodexWorkflowService', () => {
     )
     expect(commentService.createComment).toHaveBeenCalledWith(
       101,
-      'Draft technical plan PR is ready for review: https://github.com/harness-kanban/payments-api/pull/17',
+      'https://github.com/harness-kanban/payments-api/pull/17\n\nPlease review the technical plan.',
       SystemBotId.CODE_BOT,
     )
   })
@@ -287,6 +342,9 @@ describe('HarnessWorkerCodexWorkflowService', () => {
       }),
     )
     expect(codexRunnerService.runCodexWithSchema.mock.calls[1]?.[0].prompt).toContain('Reply again with JSON only')
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[1]?.[0].prompt).toContain(
+      '{"action":"ask_questions","comment":"..."}',
+    )
     expect(commentService.createComment).toHaveBeenCalledWith(
       101,
       'Which AWS account should this planning flow target?',
@@ -297,7 +355,8 @@ describe('HarnessWorkerCodexWorkflowService', () => {
   it('builds a requestPlanChanges prompt with pull request review context', async () => {
     codexRunnerService.runCodexWithSchema.mockResolvedValue({
       threadId: 'thread-existing',
-      finalMessage: '{"action":"submit_plan","branch_name":"code-bot/issue-101-plan"}',
+      finalMessage:
+        '{"action":"submit_plan","comment":"I updated the plan based on review feedback.","branch_name":"code-bot/issue-101-plan","pr_title":"Plan issue 101: Planning workflow","pr_body":"Update the technical plan with the latest feedback."}',
     })
 
     await service.requestPlanChanges({
@@ -326,9 +385,21 @@ describe('HarnessWorkerCodexWorkflowService', () => {
     expect(prompt).toContain('Current technical plan pull request context (JSON):')
     expect(prompt).toContain('Please tighten the implementation steps.')
     expect(prompt).toContain('code-bot/issue-101-plan')
+    expect(prompt).toContain('use the same language the user used in the issue details and comments for both fields.')
+    expect(prompt).toContain('If the user or repository provides a pull request template, follow that template.')
+    expect(prompt).toContain(
+      'If the user or repository specifies a commit message convention, follow it. Otherwise, use Conventional Commits.',
+    )
+    expect(prompt).toContain('You must author the pull request title and body yourself')
+    expect(prompt).toContain(
+      '"comment":"optional-issue-comment","branch_name":"your-branch-name","pr_title":"your-pr-title","pr_body":"your-pr-body"',
+    )
+    expect(prompt).toContain(
+      "avoid '#<issueId>' because it can be confused with GitHub issue references; use a natural-language reference such as 'issue 123' instead.",
+    )
     expect(commentService.createComment).toHaveBeenCalledWith(
       101,
-      'Updated technical plan PR is ready for review: https://github.com/harness-kanban/payments-api/pull/17',
+      'https://github.com/harness-kanban/payments-api/pull/17\n\nI updated the plan based on review feedback.',
       SystemBotId.CODE_BOT,
     )
   })
@@ -381,7 +452,8 @@ describe('HarnessWorkerCodexWorkflowService', () => {
   it('starts implementation by running Codex and moving the PR into review', async () => {
     codexRunnerService.runCodexWithSchema.mockResolvedValue({
       threadId: 'thread-existing',
-      finalMessage: '{"action":"submit_for_review","branch_name":"code-bot/issue-101"}',
+      finalMessage:
+        '{"action":"submit_for_review","comment":"Please review the implementation changes.","branch_name":"code-bot/issue-101","pr_title":"feat(worker): implement planning workflow","pr_body":"## Summary\\n- implement the approved workflow\\n\\n## Testing\\n- pnpm test"}',
     })
 
     await service.startImplementation({
@@ -413,15 +485,25 @@ describe('HarnessWorkerCodexWorkflowService', () => {
     expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
       'reorganize the pull request title and body so they clearly describe the final implementation instead of the planning phase',
     )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'If none is provided, use Conventional Commits.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      'If the user or repository provides a pull request template, follow that template.',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[0]?.[0].prompt).toContain(
+      '{"action":"submit_for_review","comment":"optional-issue-comment","branch_name":"your-branch-name","pr_title":"your-pr-title","pr_body":"your-pr-body"}',
+    )
     expect(githubService.ensureReadyForReviewPullRequest).toHaveBeenCalledWith({
       issueId: 101,
       workspaceId: 'workspace-1',
       branchName: 'code-bot/issue-101',
-      issueTitle: 'Planning workflow',
+      pullRequestTitle: 'feat(worker): implement planning workflow',
+      pullRequestBody: '## Summary\n- implement the approved workflow\n\n## Testing\n- pnpm test',
     })
     expect(commentService.createComment).toHaveBeenCalledWith(
       101,
-      'Implementation PR is ready for review: https://github.com/harness-kanban/payments-api/pull/22',
+      'https://github.com/harness-kanban/payments-api/pull/22\n\nPlease review the implementation changes.',
       SystemBotId.CODE_BOT,
     )
   })
@@ -476,7 +558,8 @@ describe('HarnessWorkerCodexWorkflowService', () => {
       })
       .mockResolvedValueOnce({
         threadId: 'thread-existing',
-        finalMessage: '{"action":"submit_for_review","branch_name":"code-bot/issue-101"}',
+        finalMessage:
+          '{"action":"submit_for_review","comment":"","branch_name":"code-bot/issue-101","pr_title":"feat(worker): implement planning workflow","pr_body":"Implementation PR body"}',
       })
 
     await service.startImplementation({
@@ -496,12 +579,19 @@ describe('HarnessWorkerCodexWorkflowService', () => {
       }),
     )
     expect(codexRunnerService.runCodexWithSchema.mock.calls[1]?.[0].prompt).toContain('Reply again with JSON only')
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[1]?.[0].prompt).toContain(
+      '{"action":"request_help","comment":"..."}',
+    )
+    expect(codexRunnerService.runCodexWithSchema.mock.calls[1]?.[0].prompt).toContain(
+      '{"action":"submit_for_review","comment":"optional-issue-comment","branch_name":"...","pr_title":"...","pr_body":"..."}',
+    )
   })
 
   it('applies requested code changes using the implementation PR context', async () => {
     codexRunnerService.runCodexWithSchema.mockResolvedValue({
       threadId: 'thread-existing',
-      finalMessage: '{"action":"submit_for_review","branch_name":"code-bot/issue-101"}',
+      finalMessage:
+        '{"action":"submit_for_review","comment":"","branch_name":"code-bot/issue-101","pr_title":"fix(worker): address review feedback","pr_body":"Updated implementation details."}',
     })
 
     await service.applyRequestedCodeChanges({

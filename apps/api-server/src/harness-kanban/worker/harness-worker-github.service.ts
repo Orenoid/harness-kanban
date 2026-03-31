@@ -16,14 +16,16 @@ type IssueProjectRepository = {
 type EnsureDraftPullRequestInput = {
   branchName: string
   issueId: number
-  issueTitle: string
+  pullRequestBody: string
+  pullRequestTitle: string
   workspaceId: string
 }
 
 type EnsurePullRequestInput = {
   branchName: string
   issueId: number
-  issueTitle: string
+  pullRequestBody: string
+  pullRequestTitle: string
   workspaceId: string
 }
 
@@ -241,6 +243,7 @@ export class HarnessWorkerGithubService {
       input.branchName,
     )
     if (existingPullRequest?.html_url && typeof existingPullRequest.number === 'number') {
+      await this.updatePullRequestMetadata(reference.owner, reference.repo, existingPullRequest.number, input)
       const result = {
         number: existingPullRequest.number,
         url: existingPullRequest.html_url,
@@ -280,6 +283,7 @@ export class HarnessWorkerGithubService {
     )
     if (existingPullRequest?.html_url && typeof existingPullRequest.number === 'number') {
       if (existingPullRequest.draft) {
+        await this.updatePullRequestMetadata(reference.owner, reference.repo, existingPullRequest.number, input)
         const result = await this.markPullRequestReadyForReview(
           reference.owner,
           reference.repo,
@@ -298,6 +302,7 @@ export class HarnessWorkerGithubService {
         number: existingPullRequest.number,
         url: existingPullRequest.html_url,
       }
+      await this.updatePullRequestMetadata(reference.owner, reference.repo, existingPullRequest.number, input)
       await this.persistPullRequestReference(input.issueId, 'implementation', {
         headBranch: existingPullRequest.head?.ref?.trim() || input.branchName,
         number: result.number,
@@ -869,22 +874,15 @@ export class HarnessWorkerGithubService {
     baseBranch: string,
     input: EnsureDraftPullRequestInput,
   ): Promise<EnsurePullRequestResult> {
-    const title = `Technical plan for issue #${input.issueId}: ${input.issueTitle}`
-    const body = [
-      `Technical planning branch for issue #${input.issueId}.`,
-      '',
-      'This draft PR was created by Code Bot automation after generating technical_plan.md.',
-    ].join('\n')
-
     const pullRequest = await this.githubRequest<GithubPullRequest>(
       `https://api.github.com/repos/${owner}/${repo}/pulls`,
       {
         method: 'POST',
         body: JSON.stringify({
-          title,
+          title: input.pullRequestTitle,
           head: input.branchName,
           base: baseBranch,
-          body,
+          body: input.pullRequestBody,
           draft: true,
         }),
       },
@@ -906,22 +904,15 @@ export class HarnessWorkerGithubService {
     baseBranch: string,
     input: EnsurePullRequestInput,
   ): Promise<EnsurePullRequestResult> {
-    const title = `Issue #${input.issueId}: ${input.issueTitle}`
-    const body = [
-      `Implementation branch for issue #${input.issueId}.`,
-      '',
-      'This pull request was created by Code Bot automation after implementation completed.',
-    ].join('\n')
-
     const pullRequest = await this.githubRequest<GithubPullRequest>(
       `https://api.github.com/repos/${owner}/${repo}/pulls`,
       {
         method: 'POST',
         body: JSON.stringify({
-          title,
+          title: input.pullRequestTitle,
           head: input.branchName,
           base: baseBranch,
-          body,
+          body: input.pullRequestBody,
           draft: false,
         }),
       },
@@ -958,6 +949,24 @@ export class HarnessWorkerGithubService {
       number: pullRequest.number,
       url: pullRequest.html_url,
     }
+  }
+
+  private async updatePullRequestMetadata(
+    owner: string,
+    repo: string,
+    pullRequestNumber: number,
+    input: { pullRequestBody: string; pullRequestTitle: string },
+  ): Promise<void> {
+    await this.githubRequest<GithubPullRequest>(
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: input.pullRequestTitle,
+          body: input.pullRequestBody,
+        }),
+      },
+    )
   }
 
   private async loadPersistedPullRequestReference(

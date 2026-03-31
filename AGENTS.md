@@ -125,6 +125,67 @@ Harness Kanban is an AI-powered issue tracking system - a modern, AI-native alte
 | `pnpm type-check` | Type-check without emitting    |
 | `pnpm lint`       | Run ESLint on src/             |
 
+### Commit Message Convention
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) for all commit messages.
+
+Format:
+
+```text
+<type>(<scope>): <description>
+```
+
+Common `type` values:
+
+- `feat`: a new feature
+- `fix`: a bug fix
+- `refactor`: a code change that neither fixes a bug nor adds a feature
+- `docs`: documentation only changes
+- `test`: adding or updating tests
+- `chore`: maintenance work (build tooling, deps, config, etc.)
+
+Examples:
+
+```text
+feat(api): add issue assignment endpoint
+fix(web): handle empty state in kanban column
+docs(readme): update local development steps
+```
+
+### Branch Naming Convention
+
+Use branch names that are clear, searchable, and aligned with the change type.
+
+Format:
+
+```text
+<type>/<scope>-<short-description>
+```
+
+Branch naming rules:
+
+- Use lowercase letters and hyphens only
+- Keep the description short and specific
+- Match `type` with commit intent when possible
+
+Common `type` values:
+
+- `feat`: new feature work
+- `fix`: bug fixes
+- `refactor`: non-functional code restructuring
+- `docs`: documentation updates
+- `test`: test-related work
+- `chore`: tooling or maintenance tasks
+
+Examples:
+
+```text
+feat/api-issue-assignment
+fix/web-kanban-empty-state
+docs/readme-dev-setup
+chore/worker-deps-update
+```
+
 ### Testing
 
 <!-- some convention and tips on tests design and implementation -->

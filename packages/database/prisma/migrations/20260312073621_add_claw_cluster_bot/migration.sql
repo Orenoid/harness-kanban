@@ -1,7 +1,7 @@
 INSERT INTO "user" (id, name, email, "emailVerified", type, image, "createdAt", "updatedAt")
 VALUES (
   'bot_code_bot',
-  'Code Bot',
+  'CodeBot',
   'bot@code-bot.local',
   true,
   'bot',

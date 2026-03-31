@@ -33,28 +33,55 @@ const askQuestionsResultSchema = z.object({
 
 const submitPlanResultSchema = z.object({
   action: z.literal('submit_plan'),
+  comment: z.string(),
   branch_name: z.string().trim().min(1),
+  pr_title: z.string().trim().min(1),
+  pr_body: z.string().trim().min(1),
 })
 
 const codexPlanningEnvelopeSchema = z.object({
   action: z.enum(['ask_questions', 'submit_plan']),
   comment: z.string(),
   branch_name: z.string(),
+  pr_title: z.string(),
+  pr_body: z.string(),
 })
 
 const planningResultSchema = z.union([askQuestionsResultSchema, submitPlanResultSchema])
 
 const planningOutputJsonSchema = {
   type: 'object',
+  description:
+    "For planning runs, you must author the draft pull request title and body yourself and return them in this JSON response. Write the pull request title and body in the same language the user used in the issue details and comments. When referring to the issue in pull request content, avoid '#<issueId>' and use a natural-language reference such as 'issue 123' instead so it is not confused with GitHub issue references.",
   properties: {
     action: {
       type: 'string',
       enum: ['ask_questions', 'submit_plan'],
+      description:
+        "Use 'ask_questions' only when clarification is required. Use 'submit_plan' only after the plan branch is committed and pushed, and after you have authored the pull request title and body in the user's language.",
     },
-    comment: { type: 'string' },
-    branch_name: { type: 'string' },
+    comment: {
+      type: 'string',
+      description:
+        "For 'ask_questions', write the clarification question in the user's language when appropriate. For 'submit_plan', this is an optional issue comment that the system will place below the pull request URL, also in the user's language.",
+    },
+    branch_name: {
+      type: 'string',
+      description:
+        "For 'submit_plan', return the technical plan branch name. For 'ask_questions', return an empty string.",
+    },
+    pr_title: {
+      type: 'string',
+      description:
+        "For 'submit_plan', return the draft pull request title in the user's language. For 'ask_questions', return an empty string.",
+    },
+    pr_body: {
+      type: 'string',
+      description:
+        "For 'submit_plan', return the draft pull request body in the user's language. Follow any user or repository pull request template when present. For 'ask_questions', return an empty string.",
+    },
   },
-  required: ['action', 'comment', 'branch_name'],
+  required: ['action', 'comment', 'branch_name', 'pr_title', 'pr_body'],
   additionalProperties: false,
 } as const
 
@@ -65,28 +92,55 @@ const requestHelpResultSchema = z.object({
 
 const submitForReviewResultSchema = z.object({
   action: z.literal('submit_for_review'),
+  comment: z.string(),
   branch_name: z.string().trim().min(1),
+  pr_title: z.string().trim().min(1),
+  pr_body: z.string().trim().min(1),
 })
 
 const codexImplementationEnvelopeSchema = z.object({
   action: z.enum(['request_help', 'submit_for_review']),
   comment: z.string(),
   branch_name: z.string(),
+  pr_title: z.string(),
+  pr_body: z.string(),
 })
 
 const implementationResultSchema = z.union([requestHelpResultSchema, submitForReviewResultSchema])
 
 const implementationOutputJsonSchema = {
   type: 'object',
+  description:
+    'For implementation runs, write any issue comment, pull request title, and pull request body in the same language the user used in the issue details and comments. If the user or repository provides a pull request template, follow it in the pull request body.',
   properties: {
     action: {
       type: 'string',
       enum: ['request_help', 'submit_for_review'],
+      description:
+        "Use 'request_help' only when truly blocked. Use 'submit_for_review' only after the branch is pushed and the pull request title and body are authored in the user's language.",
     },
-    comment: { type: 'string' },
-    branch_name: { type: 'string' },
+    comment: {
+      type: 'string',
+      description:
+        "For 'request_help', explain the blocker in the user's language when appropriate. For 'submit_for_review', this is an optional issue comment that the system will place below the pull request URL, also in the user's language.",
+    },
+    branch_name: {
+      type: 'string',
+      description:
+        "For 'submit_for_review', return the implementation branch name. For 'request_help', return an empty string.",
+    },
+    pr_title: {
+      type: 'string',
+      description:
+        "For 'submit_for_review', return the implementation pull request title in the user's language. For 'request_help', return an empty string.",
+    },
+    pr_body: {
+      type: 'string',
+      description:
+        "For 'submit_for_review', return the implementation pull request body in the user's language. Follow any user or repository pull request template when present. For 'request_help', return an empty string.",
+    },
   },
-  required: ['action', 'comment', 'branch_name'],
+  required: ['action', 'comment', 'branch_name', 'pr_title', 'pr_body'],
   additionalProperties: false,
 } as const
 
@@ -189,9 +243,7 @@ export class HarnessWorkerCodexWorkflowService {
       this.logger.log(
         `Completed startPlanning workflow for issue ${input.issueId} with action ${planningResult.action}`,
       )
-      await this.handlePlanningResult(input.issueId, input.workspaceId, planningResult, {
-        readyComment: 'Draft technical plan PR is ready for review',
-      })
+      await this.handlePlanningResult(input.issueId, input.workspaceId, planningResult)
     } catch (error) {
       await this.handlePlanningFailure(input.issueId, input.workspaceId, error, {
         instruction: 'Please resolve the blocker and trigger the next planning step when work should continue.',
@@ -223,9 +275,7 @@ export class HarnessWorkerCodexWorkflowService {
       this.logger.log(
         `Completed resumePlanning workflow for issue ${input.issueId} with action ${planningResult.action}`,
       )
-      await this.handlePlanningResult(input.issueId, input.workspaceId, planningResult, {
-        readyComment: 'Updated technical plan PR is ready for review',
-      })
+      await this.handlePlanningResult(input.issueId, input.workspaceId, planningResult)
     } catch (error) {
       await this.handlePlanningFailure(input.issueId, input.workspaceId, error, {
         instruction: 'Please resolve the blocker and move the issue back to Planning if planning should continue.',
@@ -261,9 +311,7 @@ export class HarnessWorkerCodexWorkflowService {
       this.logger.log(
         `Completed requestPlanChanges workflow for issue ${input.issueId} with action ${planningResult.action}`,
       )
-      await this.handlePlanningResult(input.issueId, input.workspaceId, planningResult, {
-        readyComment: 'Updated technical plan PR is ready for review',
-      })
+      await this.handlePlanningResult(input.issueId, input.workspaceId, planningResult)
     } catch (error) {
       await this.handlePlanningFailure(input.issueId, input.workspaceId, error, {
         instruction: 'Please resolve the blocker and move the issue back to Planning if planning should continue.',
@@ -516,9 +564,9 @@ export class HarnessWorkerCodexWorkflowService {
       'Task instructions:',
       '1. Inspect the codebase and the issue details, including comments. Follow repository guidance files such as AGENTS.md or CLAUDE.md.',
       '2. Determine whether the request is clear enough to produce a technical plan. Check for ambiguous requirements, missing acceptance criteria, and external dependencies such as OpenAI, AWS, third-party APIs, infrastructure, credentials, or data access.',
-      '3. If clarification is required, do not create or modify files, branches, commits, pushes, or pull requests. Return exactly {"action":"ask_questions","comment":"...","branch_name":""} with the concise question(s) the system should post as an issue comment.',
+      '3. If clarification is required, do not create or modify files, branches, commits, pushes, or pull requests. Return exactly {"action":"ask_questions","comment":"..."} with the concise question(s) the system should post as an issue comment.',
       '4. If the request is clear enough, continue with planning only. Do not implement the feature itself in this phase.',
-      '5. Create a new branch that is appropriate for the issue.',
+      '5. Create a new branch that is appropriate for the issue. If the repository defines a branch naming convention in AGENTS.md, CLAUDE.md, or other repository guidance, follow that convention. Otherwise, name the branch using the format <type>/<short-description>. Even during the planning phase, name the branch for the actual change being planned or implemented, not as a generic plan branch.',
       '6. In the repository root, create technical_plan.md and write the technical plan.',
       '7. The technical plan must specify changes at the granularity of classes, functions, components, database, APIs, test cases, integration points, and operational considerations when relevant.',
       '8. Use this structure for technical_plan.md:',
@@ -544,11 +592,12 @@ export class HarnessWorkerCodexWorkflowService {
       '## Notes',
       '[Additional notes or considerations]',
       '',
-      '9. Commit technical_plan.md on the new branch and push the branch to the remote repository.',
-      '10. Create a draft pull request if the environment supports it. The automation system will also verify or create the draft pull request based on the branch you return.',
-      '11. If you do not need clarification, finish by returning exactly {"action":"submit_plan","comment":"","branch_name":"your-branch-name"} and nothing else.',
-      '12. Do not ask clarifying questions if the request is already clear or straightforward enough to plan.',
-      '13. Do not wrap the final JSON in markdown fences and do not include extra prose.',
+      '9. Commit technical_plan.md on the new branch and push the branch to the remote repository. If the user or repository specifies a commit message convention, follow it. Otherwise, use Conventional Commits.',
+      "10. Create a draft pull request if the environment supports it. You must author the pull request title and body yourself and use the same language the user used in the issue details and comments for both fields. If the user or repository provides a pull request template, follow that template. When referring to the issue in pull request content, avoid '#<issueId>' because it can be confused with GitHub issue references; use a natural-language reference such as 'issue 123' instead. The automation system will also verify or create the draft pull request based on the branch, title, and body you return.",
+      '11. For submit_plan, you may also provide an additional issue comment in the same language as the user. The system will place the pull request URL on the first line and then append your comment below it.',
+      '12. If you do not need clarification, finish by returning exactly {"action":"submit_plan","comment":"optional-issue-comment","branch_name":"your-branch-name","pr_title":"your-pr-title","pr_body":"your-pr-body"} and nothing else.',
+      '13. Do not ask clarifying questions if the request is already clear or straightforward enough to plan.',
+      '14. Do not wrap the final JSON in markdown fences and do not include extra prose.',
     ].join('\n')
   }
 
@@ -584,13 +633,14 @@ export class HarnessWorkerCodexWorkflowService {
       existingBranch
         ? `5. Continue working on the existing planning branch ${existingBranch}. Reuse it unless the branch is unavailable.`
         : '5. Continue from the existing planning context when possible.',
-      '6. If clarification is required, do not create or modify files, branches, commits, pushes, or pull requests. Return exactly {"action":"ask_questions","comment":"...","branch_name":""} with the concise question(s) the system should post as an issue comment.',
+      '6. If clarification is required, do not create or modify files, branches, commits, pushes, or pull requests. Return exactly {"action":"ask_questions","comment":"..."} with the concise question(s) the system should post as an issue comment.',
       '7. The technical plan must specify changes at the granularity of classes, functions, components, database, APIs, test cases, integration points, and operational considerations when relevant.',
       '8. Keep the structure of technical_plan.md aligned with the repository planning template and refresh any section that changed because of the review.',
-      '9. Commit the updated technical_plan.md on the planning branch and push the branch to the remote repository.',
-      '10. Keep or create a draft pull request if the environment supports it. The automation system will also verify or create the draft pull request based on the branch you return.',
-      '11. If you do not need clarification, finish by returning exactly {"action":"submit_plan","comment":"","branch_name":"your-branch-name"} and nothing else.',
-      '12. Do not wrap the final JSON in markdown fences and do not include extra prose.',
+      '9. Commit the updated technical_plan.md on the planning branch and push the branch to the remote repository. If the user or repository specifies a commit message convention, follow it. Otherwise, use Conventional Commits.',
+      "10. Keep or create a draft pull request if the environment supports it. You must author the pull request title and body yourself and use the same language the user used in the issue details and comments for both fields. If the user or repository provides a pull request template, follow that template. When referring to the issue in pull request content, avoid '#<issueId>' because it can be confused with GitHub issue references; use a natural-language reference such as 'issue 123' instead. The automation system will also verify or create the draft pull request based on the branch, title, and body you return.",
+      '11. For submit_plan, you may also provide an additional issue comment in the same language as the user. The system will place the pull request URL on the first line and then append your comment below it.',
+      '12. If you do not need clarification, finish by returning exactly {"action":"submit_plan","comment":"optional-issue-comment","branch_name":"your-branch-name","pr_title":"your-pr-title","pr_body":"your-pr-body"} and nothing else.',
+      '13. Do not wrap the final JSON in markdown fences and do not include extra prose.',
     ].join('\n')
   }
 
@@ -621,10 +671,13 @@ export class HarnessWorkerCodexWorkflowService {
       // TODO remove 9th, shouldn't be prompted by the system. it's the project's AGENTS.md's responsibility
       '9. Implement or repair the code, run the relevant checks, and fix issues before you finish. Prefer repository-standard commands for validation.',
       '10. Do not request help unless you are truly blocked after exhausting reasonable options. The user may be offline, so unnecessary help requests will stall delivery.',
-      '11. If you are truly blocked by missing product decisions, unavailable credentials, unavailable external systems, or irrecoverable environment constraints, return exactly {"action":"request_help","comment":"...","branch_name":""} with a concise explanation of the blocker and what the user must provide.',
+      '11. If you are truly blocked by missing product decisions, unavailable credentials, unavailable external systems, or irrecoverable environment constraints, return exactly {"action":"request_help","comment":"..."} with a concise explanation of the blocker and what the user must provide.',
       '12. Before returning submit_for_review, delete technical_plan.md from the branch if it is still present, and reorganize the pull request title and body so they clearly describe the final implementation instead of the planning phase.',
-      '13. If implementation is complete for this round, commit the changes, push the branch, open or update a non-draft pull request, and return exactly {"action":"submit_for_review","comment":"","branch_name":"your-branch-name"} and nothing else.',
-      '14. Do not wrap the final JSON in markdown fences and do not include extra prose.',
+      '13. When committing, follow any commit message convention provided by the user or repository. If none is provided, use Conventional Commits.',
+      '14. When opening or updating the implementation pull request, use the same language the user used in the issue details and comments for the pull request title, pull request body, and any additional issue comment you provide. If the user or repository provides a pull request template, follow that template.',
+      '15. If implementation is complete for this round, commit the changes, push the branch, open or update a non-draft pull request, and return exactly {"action":"submit_for_review","comment":"optional-issue-comment","branch_name":"your-branch-name","pr_title":"your-pr-title","pr_body":"your-pr-body"} and nothing else.',
+      '16. The system will place the pull request URL on the first line of the issue comment and then append your comment below it.',
+      '17. Do not wrap the final JSON in markdown fences and do not include extra prose.',
     ]
 
     return [
@@ -653,8 +706,8 @@ export class HarnessWorkerCodexWorkflowService {
       `Previous response: ${this.truncate(rawOutput.trim(), 500)}`,
       'Reply again with JSON only and no markdown fences.',
       'Valid responses are exactly one of:',
-      '{"action":"ask_questions","comment":"...","branch_name":""}',
-      '{"action":"submit_plan","comment":"","branch_name":"..."}',
+      '{"action":"ask_questions","comment":"..."}',
+      '{"action":"submit_plan","comment":"optional-issue-comment","branch_name":"...","pr_title":"...","pr_body":"..."}',
     ].join('\n')
   }
 
@@ -665,8 +718,8 @@ export class HarnessWorkerCodexWorkflowService {
       `Previous response: ${this.truncate(rawOutput.trim(), 500)}`,
       'Reply again with JSON only and no markdown fences.',
       'Valid responses are exactly one of:',
-      '{"action":"request_help","comment":"...","branch_name":""}',
-      '{"action":"submit_for_review","comment":"","branch_name":"..."}',
+      '{"action":"request_help","comment":"..."}',
+      '{"action":"submit_for_review","comment":"optional-issue-comment","branch_name":"...","pr_title":"...","pr_body":"..."}',
     ].join('\n')
   }
 
@@ -761,12 +814,22 @@ export class HarnessWorkerCodexWorkflowService {
   private normalizeCodexPlanningEnvelope(payload: z.infer<typeof codexPlanningEnvelopeSchema>): PlanningResult | null {
     const comment = payload.comment.trim()
     const branchName = payload.branch_name.trim()
+    const pullRequestTitle = payload.pr_title.trim()
+    const pullRequestBody = payload.pr_body.trim()
 
     if (payload.action === 'ask_questions') {
       return comment ? { action: 'ask_questions', comment } : null
     }
 
-    return branchName ? { action: 'submit_plan', branch_name: branchName } : null
+    return branchName && pullRequestTitle && pullRequestBody
+      ? {
+          action: 'submit_plan',
+          comment,
+          branch_name: branchName,
+          pr_title: pullRequestTitle,
+          pr_body: pullRequestBody,
+        }
+      : null
   }
 
   private normalizeCodexImplementationEnvelope(
@@ -774,12 +837,22 @@ export class HarnessWorkerCodexWorkflowService {
   ): ImplementationResult | null {
     const comment = payload.comment.trim()
     const branchName = payload.branch_name.trim()
+    const pullRequestTitle = payload.pr_title.trim()
+    const pullRequestBody = payload.pr_body.trim()
 
     if (payload.action === 'request_help') {
       return comment ? { action: 'request_help', comment } : null
     }
 
-    return branchName ? { action: 'submit_for_review', branch_name: branchName } : null
+    return branchName && pullRequestTitle && pullRequestBody
+      ? {
+          action: 'submit_for_review',
+          comment,
+          branch_name: branchName,
+          pr_title: pullRequestTitle,
+          pr_body: pullRequestBody,
+        }
+      : null
   }
 
   private getSystemMessageForMode(mode: HarnessWorkerImplementationMode): string {
@@ -812,9 +885,6 @@ export class HarnessWorkerCodexWorkflowService {
     issueId: number,
     workspaceId: string,
     planningResult: PlanningResult,
-    options: {
-      readyComment: string
-    },
   ): Promise<void> {
     const summary = await this.loadIssueSummary(issueId)
 
@@ -839,7 +909,8 @@ export class HarnessWorkerCodexWorkflowService {
       issueId,
       workspaceId,
       branchName: planningResult.branch_name,
-      issueTitle: summary.title,
+      pullRequestTitle: planningResult.pr_title,
+      pullRequestBody: planningResult.pr_body,
     })
 
     const transitionResult = await this.transitionIssue(
@@ -856,7 +927,7 @@ export class HarnessWorkerCodexWorkflowService {
 
     await this.commentService.createComment(
       issueId,
-      `${options.readyComment}: ${pullRequest.url}`,
+      this.buildPullRequestIssueComment(pullRequest.url, planningResult.comment),
       SystemBotId.CODE_BOT,
     )
   }
@@ -877,28 +948,29 @@ export class HarnessWorkerCodexWorkflowService {
       return
     }
 
-    await this.finalizeImplementationReviewSubmission(input, summary, implementationResult.branch_name)
+    await this.finalizeImplementationReviewSubmission(input, summary, implementationResult)
   }
 
   private async finalizeImplementationReviewSubmission(
     input: HarnessWorkerCodexWorkflowInput,
-    summary: { createdBy: string; title: string },
-    initialBranchName: string,
+    summary: { createdBy: string },
+    initialResult: Extract<ImplementationResult, { action: 'submit_for_review' }>,
   ): Promise<void> {
-    let branchName = initialBranchName
+    let currentResult = initialResult
 
     for (let attempt = 0; attempt <= this.implementationReviewRepairAttempts; attempt += 1) {
       // Keep the PR in sync with the current branch and wait until GitHub can evaluate review readiness.
       const pullRequest = await this.githubService.ensureReadyForReviewPullRequest({
         issueId: input.issueId,
         workspaceId: input.workspaceId,
-        branchName,
-        issueTitle: summary.title,
+        branchName: currentResult.branch_name,
+        pullRequestTitle: currentResult.pr_title,
+        pullRequestBody: currentResult.pr_body,
       })
       const readiness = await this.githubService.waitForImplementationPullRequestReadiness({
         issueId: input.issueId,
         workspaceId: input.workspaceId,
-        branchName,
+        branchName: currentResult.branch_name,
       })
 
       if (readiness.state === 'ready') {
@@ -916,7 +988,7 @@ export class HarnessWorkerCodexWorkflowService {
 
         await this.commentService.createComment(
           input.issueId,
-          `Implementation PR is ready for review: ${pullRequest.url}`,
+          this.buildPullRequestIssueComment(pullRequest.url, currentResult.comment),
           SystemBotId.CODE_BOT,
         )
         return
@@ -954,8 +1026,13 @@ export class HarnessWorkerCodexWorkflowService {
         return
       }
 
-      branchName = repairResult.branch_name
+      currentResult = repairResult
     }
+  }
+
+  private buildPullRequestIssueComment(pullRequestUrl: string, comment: string): string {
+    const trimmedComment = comment.trim()
+    return trimmedComment ? `${pullRequestUrl}\n\n${trimmedComment}` : pullRequestUrl
   }
 
   private async moveImplementationBackToHuman(
