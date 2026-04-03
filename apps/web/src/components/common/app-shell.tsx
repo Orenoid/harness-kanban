@@ -1,6 +1,6 @@
 'use client'
 
-import { FolderIcon, MoonIcon, SunIcon } from 'lucide-react'
+import { FolderIcon, MoonIcon, SettingsIcon, SunIcon } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -22,6 +22,13 @@ const APP_NAV_ITEMS = [
     matches: (pathname: string) => pathname === '/projects' || pathname.startsWith('/projects/'),
   },
 ]
+
+const SETTINGS_NAV_ITEM = {
+  href: '/settings/connections',
+  label: 'Settings',
+  icon: SettingsIcon,
+  matches: (pathname: string) => pathname === '/settings' || pathname.startsWith('/settings/'),
+}
 
 interface AppShellFrameProps extends PropsWithChildren {
   sidebar?: React.ReactNode
@@ -104,6 +111,31 @@ export const AppSidebarView: React.FC<AppSidebarViewProps> = ({
       </div>
 
       <div className="flex flex-col items-center gap-2">
+        {notificationControl}
+        {userControl}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link
+              href={SETTINGS_NAV_ITEM.href}
+              aria-label={SETTINGS_NAV_ITEM.label}
+              aria-current={SETTINGS_NAV_ITEM.matches(pathname) ? 'page' : undefined}
+              className={cn(
+                'focus-visible:ring-sidebar-ring flex size-10 items-center justify-center rounded-xl outline-none transition focus-visible:ring-2',
+                SETTINGS_NAV_ITEM.matches(pathname)
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+              )}>
+              <SETTINGS_NAV_ITEM.icon
+                className={cn('size-5 shrink-0', SETTINGS_NAV_ITEM.matches(pathname) && 'text-sidebar-primary')}
+              />
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={10}>
+            {SETTINGS_NAV_ITEM.label}
+          </TooltipContent>
+        </Tooltip>
+
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -129,9 +161,6 @@ export const AppSidebarView: React.FC<AppSidebarViewProps> = ({
             Toggle theme
           </TooltipContent>
         </Tooltip>
-
-        {notificationControl}
-        {userControl}
       </div>
     </aside>
   )
@@ -190,7 +219,8 @@ export const AppSidebar: React.FC = () => {
 
 export const AppShell: React.FC<PropsWithChildren> = ({ children }) => {
   const pathname = usePathname() ?? ''
-  const showSidebar = pathname.startsWith('/issues') || pathname.startsWith('/projects')
+  const showSidebar =
+    pathname.startsWith('/issues') || pathname.startsWith('/projects') || pathname.startsWith('/settings')
 
   return <AppShellFrame sidebar={showSidebar ? <AppSidebar /> : undefined}>{children}</AppShellFrame>
 }

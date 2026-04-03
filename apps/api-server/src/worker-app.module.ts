@@ -1,5 +1,6 @@
 import { AuthModule } from '@/auth/auth.module'
 import { DatabaseModule } from '@/database/database.module'
+import { GithubModule } from '@/github/github.module'
 import { HarnessKanbanModule } from '@/harness-kanban/harness-kanban.module'
 import { HarnessKanbanService } from '@/harness-kanban/worker/harness-kanban.service'
 import { HarnessWorkerCodexRunnerService } from '@/harness-kanban/worker/harness-worker-codex-runner.service'
@@ -24,6 +25,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter'
     }),
     EventEmitterModule.forRoot(),
     DatabaseModule,
+    GithubModule,
     HarnessKanbanModule,
     PgmqModule,
     AuthModule,

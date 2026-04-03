@@ -40,12 +40,9 @@ cp apps/web/.env.example apps/web/.env
 cp apps/api-server/.env.worker.example apps/api-server/.env.worker
 ```
 
-Then fill `GITHUB_TOKEN` and `CODEX_AUTH_JSON` in `apps/api-server/.env.worker`.
+Then fill `CODEX_AUTH_JSON` in `apps/api-server/.env.worker`.
 
-- `GITHUB_TOKEN`: Create a GitHub personal access token at [https://github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new) and grant the repository access needed by your worker runtime.
 - `CODEX_AUTH_JSON`: Read your local Codex auth file from `~/.codex/auth.json` and compress it into a single line before putting it into `.env.worker`, for example: `cat ~/.codex/auth.json | jq -c .`
-
-> Direct configuration in the GUI will be supported in a future update.
 
 Start the stack:
 

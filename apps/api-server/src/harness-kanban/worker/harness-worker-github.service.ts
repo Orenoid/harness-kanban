@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises'
 
 import { PrismaService } from '@/database/prisma.service'
+import { GithubService } from '@/github/github.service'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@repo/database'
@@ -215,6 +216,7 @@ export class HarnessWorkerGithubService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly githubService: GithubService,
   ) {
     this.readinessPollIntervalMs = this.getPositiveInteger(
       'HARNESS_WORKER_GITHUB_READINESS_POLL_INTERVAL_MS',
@@ -237,13 +239,21 @@ export class HarnessWorkerGithubService {
       throw new Error(`Unsupported GitHub repository URL: ${repository.githubRepoUrl}`)
     }
 
+    const githubToken = await this.githubService.getTokenForWorkspace(input.workspaceId)
     const existingPullRequest = await this.findOpenPullRequestByBranch(
+      githubToken,
       reference.owner,
       reference.repo,
       input.branchName,
     )
     if (existingPullRequest?.html_url && typeof existingPullRequest.number === 'number') {
-      await this.updatePullRequestMetadata(reference.owner, reference.repo, existingPullRequest.number, input)
+      await this.updatePullRequestMetadata(
+        githubToken,
+        reference.owner,
+        reference.repo,
+        existingPullRequest.number,
+        input,
+      )
       const result = {
         number: existingPullRequest.number,
         url: existingPullRequest.html_url,
@@ -256,7 +266,13 @@ export class HarnessWorkerGithubService {
       return result
     }
 
-    const result = await this.createDraftPullRequest(reference.owner, reference.repo, repository.repoBaseBranch, input)
+    const result = await this.createDraftPullRequest(
+      githubToken,
+      reference.owner,
+      reference.repo,
+      repository.repoBaseBranch,
+      input,
+    )
     await this.persistPullRequestReference(input.issueId, 'plan', {
       headBranch: input.branchName,
       number: result.number,
@@ -276,15 +292,24 @@ export class HarnessWorkerGithubService {
       throw new Error(`Unsupported GitHub repository URL: ${repository.githubRepoUrl}`)
     }
 
+    const githubToken = await this.githubService.getTokenForWorkspace(input.workspaceId)
     const existingPullRequest = await this.findOpenPullRequestByBranch(
+      githubToken,
       reference.owner,
       reference.repo,
       input.branchName,
     )
     if (existingPullRequest?.html_url && typeof existingPullRequest.number === 'number') {
       if (existingPullRequest.draft) {
-        await this.updatePullRequestMetadata(reference.owner, reference.repo, existingPullRequest.number, input)
+        await this.updatePullRequestMetadata(
+          githubToken,
+          reference.owner,
+          reference.repo,
+          existingPullRequest.number,
+          input,
+        )
         const result = await this.markPullRequestReadyForReview(
+          githubToken,
           reference.owner,
           reference.repo,
           existingPullRequest.number,
@@ -302,7 +327,13 @@ export class HarnessWorkerGithubService {
         number: existingPullRequest.number,
         url: existingPullRequest.html_url,
       }
-      await this.updatePullRequestMetadata(reference.owner, reference.repo, existingPullRequest.number, input)
+      await this.updatePullRequestMetadata(
+        githubToken,
+        reference.owner,
+        reference.repo,
+        existingPullRequest.number,
+        input,
+      )
       await this.persistPullRequestReference(input.issueId, 'implementation', {
         headBranch: existingPullRequest.head?.ref?.trim() || input.branchName,
         number: result.number,
@@ -312,6 +343,7 @@ export class HarnessWorkerGithubService {
     }
 
     const result = await this.createReadyForReviewPullRequest(
+      githubToken,
       reference.owner,
       reference.repo,
       repository.repoBaseBranch,
@@ -336,10 +368,11 @@ export class HarnessWorkerGithubService {
       throw new Error(`Unsupported GitHub repository URL: ${repository.githubRepoUrl}`)
     }
 
+    const githubToken = await this.githubService.getTokenForWorkspace(input.workspaceId)
     const persistedPlanPullRequest = await this.loadPersistedPullRequestReference(input.issueId, 'plan')
     const pullRequest =
-      (await this.loadPullRequestByReference(reference.owner, reference.repo, persistedPlanPullRequest)) ??
-      (await this.findPlanPullRequest(reference.owner, reference.repo, input.issueId))
+      (await this.loadPullRequestByReference(githubToken, reference.owner, reference.repo, persistedPlanPullRequest)) ??
+      (await this.findPlanPullRequest(githubToken, reference.owner, reference.repo, input.issueId))
     if (!pullRequest?.html_url || typeof pullRequest.number !== 'number') {
       throw new Error(`Could not find the technical plan pull request for issue ${input.issueId}`)
     }
@@ -350,7 +383,12 @@ export class HarnessWorkerGithubService {
       url: pullRequest.html_url,
     })
 
-    const discussions = await this.loadPullRequestDiscussions(reference.owner, reference.repo, pullRequest.number)
+    const discussions = await this.loadPullRequestDiscussions(
+      githubToken,
+      reference.owner,
+      reference.repo,
+      pullRequest.number,
+    )
 
     return {
       pullRequest: {
@@ -438,13 +476,18 @@ export class HarnessWorkerGithubService {
       throw new Error(`Unsupported GitHub repository URL: ${repository.githubRepoUrl}`)
     }
 
+    const githubToken = await this.githubService.getTokenForWorkspace(input.workspaceId)
     const persistedImplementationPullRequest = input.branchName?.trim()
       ? null
       : await this.loadPersistedPullRequestReference(input.issueId, 'implementation')
     const pullRequest = input.branchName?.trim()
-      ? await this.findOpenPullRequestByBranch(reference.owner, reference.repo, input.branchName.trim())
-      : ((await this.loadPullRequestByReference(reference.owner, reference.repo, persistedImplementationPullRequest)) ??
-        (await this.findImplementationPullRequest(reference.owner, reference.repo, input.issueId)))
+      ? await this.findOpenPullRequestByBranch(githubToken, reference.owner, reference.repo, input.branchName.trim())
+      : ((await this.loadPullRequestByReference(
+          githubToken,
+          reference.owner,
+          reference.repo,
+          persistedImplementationPullRequest,
+        )) ?? (await this.findImplementationPullRequest(githubToken, reference.owner, reference.repo, input.issueId)))
 
     if (!pullRequest?.html_url || typeof pullRequest.number !== 'number') {
       if (required) {
@@ -466,12 +509,13 @@ export class HarnessWorkerGithubService {
 
     const [pullRequestDetail, discussions, combinedStatus, checkRuns] = await Promise.all([
       this.githubRequest<GithubPullRequest>(
+        githubToken,
         `https://api.github.com/repos/${reference.owner}/${reference.repo}/pulls/${pullRequest.number}`,
         { method: 'GET' },
       ),
-      this.loadPullRequestDiscussions(reference.owner, reference.repo, pullRequest.number),
-      this.loadCombinedStatus(reference.owner, reference.repo, pullRequest.head?.sha),
-      this.loadCheckRuns(reference.owner, reference.repo, pullRequest.head?.sha),
+      this.loadPullRequestDiscussions(githubToken, reference.owner, reference.repo, pullRequest.number),
+      this.loadCombinedStatus(githubToken, reference.owner, reference.repo, pullRequest.head?.sha),
+      this.loadCheckRuns(githubToken, reference.owner, reference.repo, pullRequest.head?.sha),
     ])
 
     if (!pullRequestDetail.html_url || typeof pullRequestDetail.number !== 'number') {
@@ -620,20 +664,24 @@ export class HarnessWorkerGithubService {
   }
 
   private async loadPullRequestDiscussions(
+    githubToken: string,
     owner: string,
     repo: string,
     pullRequestNumber: number,
   ): Promise<PullRequestDiscussionContext> {
     const [reviews, reviewComments, issueComments] = await Promise.all([
       this.githubRequest<GithubPullRequestReview[]>(
+        githubToken,
         `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}/reviews?per_page=100`,
         { method: 'GET' },
       ),
       this.githubRequest<GithubPullRequestReviewComment[]>(
+        githubToken,
         `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}/comments?per_page=100`,
         { method: 'GET' },
       ),
       this.githubRequest<GithubIssueComment[]>(
+        githubToken,
         `https://api.github.com/repos/${owner}/${repo}/issues/${pullRequestNumber}/comments?per_page=100`,
         { method: 'GET' },
       ),
@@ -683,6 +731,7 @@ export class HarnessWorkerGithubService {
   }
 
   private async loadCombinedStatus(
+    githubToken: string,
     owner: string,
     repo: string,
     headSha: string | undefined,
@@ -693,12 +742,14 @@ export class HarnessWorkerGithubService {
     }
 
     return this.githubRequest<GithubCombinedStatus>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/commits/${normalizedSha}/status`,
       { method: 'GET' },
     )
   }
 
   private async loadCheckRuns(
+    githubToken: string,
     owner: string,
     repo: string,
     headSha: string | undefined,
@@ -709,6 +760,7 @@ export class HarnessWorkerGithubService {
     }
 
     return this.githubRequest<GithubCheckRunsResponse>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/commits/${normalizedSha}/check-runs?per_page=100`,
       { method: 'GET' },
     )
@@ -760,12 +812,14 @@ export class HarnessWorkerGithubService {
   }
 
   private async findOpenPullRequestByBranch(
+    githubToken: string,
     owner: string,
     repo: string,
     branchName: string,
   ): Promise<GithubPullRequest | null> {
     const head = `${owner}:${branchName}`
     const pullRequests = await this.githubRequest<GithubPullRequest[]>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&head=${encodeURIComponent(head)}`,
       {
         method: 'GET',
@@ -776,6 +830,7 @@ export class HarnessWorkerGithubService {
   }
 
   private async loadPullRequestByReference(
+    githubToken: string,
     owner: string,
     repo: string,
     reference: PersistedPullRequestReference | null,
@@ -786,6 +841,7 @@ export class HarnessWorkerGithubService {
 
     try {
       return await this.githubRequest<GithubPullRequest>(
+        githubToken,
         `https://api.github.com/repos/${owner}/${repo}/pulls/${reference.number}`,
         {
           method: 'GET',
@@ -800,8 +856,14 @@ export class HarnessWorkerGithubService {
     }
   }
 
-  private async findPlanPullRequest(owner: string, repo: string, issueId: number): Promise<GithubPullRequest | null> {
+  private async findPlanPullRequest(
+    githubToken: string,
+    owner: string,
+    repo: string,
+    issueId: number,
+  ): Promise<GithubPullRequest | null> {
     const pullRequests = await this.githubRequest<GithubPullRequest[]>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`,
       {
         method: 'GET',
@@ -812,11 +874,13 @@ export class HarnessWorkerGithubService {
   }
 
   private async findImplementationPullRequest(
+    githubToken: string,
     owner: string,
     repo: string,
     issueId: number,
   ): Promise<GithubPullRequest | null> {
     const pullRequests = await this.githubRequest<GithubPullRequest[]>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&per_page=100`,
       {
         method: 'GET',
@@ -869,12 +933,14 @@ export class HarnessWorkerGithubService {
   }
 
   private async createDraftPullRequest(
+    githubToken: string,
     owner: string,
     repo: string,
     baseBranch: string,
     input: EnsureDraftPullRequestInput,
   ): Promise<EnsurePullRequestResult> {
     const pullRequest = await this.githubRequest<GithubPullRequest>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/pulls`,
       {
         method: 'POST',
@@ -899,12 +965,14 @@ export class HarnessWorkerGithubService {
   }
 
   private async createReadyForReviewPullRequest(
+    githubToken: string,
     owner: string,
     repo: string,
     baseBranch: string,
     input: EnsurePullRequestInput,
   ): Promise<EnsurePullRequestResult> {
     const pullRequest = await this.githubRequest<GithubPullRequest>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/pulls`,
       {
         method: 'POST',
@@ -929,12 +997,14 @@ export class HarnessWorkerGithubService {
   }
 
   private async markPullRequestReadyForReview(
+    githubToken: string,
     owner: string,
     repo: string,
     pullRequestNumber: number,
     input: EnsurePullRequestInput,
   ): Promise<EnsurePullRequestResult> {
     const pullRequest = await this.githubRequest<GithubPullRequest>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}/ready_for_review`,
       {
         method: 'POST',
@@ -952,12 +1022,14 @@ export class HarnessWorkerGithubService {
   }
 
   private async updatePullRequestMetadata(
+    githubToken: string,
     owner: string,
     repo: string,
     pullRequestNumber: number,
     input: { pullRequestBody: string; pullRequestTitle: string },
   ): Promise<void> {
     await this.githubRequest<GithubPullRequest>(
+      githubToken,
       `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}`,
       {
         method: 'PATCH',
@@ -1052,12 +1124,7 @@ export class HarnessWorkerGithubService {
     return value as Record<string, unknown>
   }
 
-  private async githubRequest<T>(url: string, init: RequestInit): Promise<T> {
-    const token = this.configService.get<string>('GITHUB_TOKEN')?.trim()
-    if (!token) {
-      throw new Error('GITHUB_TOKEN is not configured')
-    }
-
+  private async githubRequest<T>(token: string, url: string, init: RequestInit): Promise<T> {
     const response = await fetch(url, {
       ...init,
       headers: {

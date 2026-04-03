@@ -1,4 +1,5 @@
 import { PrismaService } from '@/database/prisma.service'
+import { GithubService } from '@/github/github.service'
 import { ConfigService } from '@nestjs/config'
 import { HarnessWorkerGithubService } from '../harness-worker-github.service'
 
@@ -6,6 +7,7 @@ describe('HarnessWorkerGithubService', () => {
   let service: HarnessWorkerGithubService
   let prismaService: jest.Mocked<PrismaService>
   let configService: jest.Mocked<ConfigService>
+  let githubService: jest.Mocked<GithubService>
   let originalFetch: typeof fetch
   let fetchMock: jest.Mock
 
@@ -30,20 +32,17 @@ describe('HarnessWorkerGithubService', () => {
     } as unknown as jest.Mocked<PrismaService>
 
     configService = {
-      get: jest.fn().mockImplementation((key: string) => {
-        if (key === 'GITHUB_TOKEN') {
-          return 'github-token-value'
-        }
-
-        return undefined
-      }),
+      get: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>
+    githubService = {
+      getTokenForWorkspace: jest.fn().mockResolvedValue('github-token-value'),
+    } as unknown as jest.Mocked<GithubService>
 
     originalFetch = global.fetch
     fetchMock = jest.fn()
     global.fetch = fetchMock as unknown as typeof fetch
 
-    service = new HarnessWorkerGithubService(prismaService, configService)
+    service = new HarnessWorkerGithubService(prismaService, configService, githubService)
   })
 
   afterEach(() => {

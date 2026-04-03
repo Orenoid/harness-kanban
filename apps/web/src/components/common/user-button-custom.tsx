@@ -182,7 +182,7 @@ export function UserButtonCustomView({
 
         <DropdownMenuSeparator className={classNames?.content?.separator} />
 
-        <Link href="/account/settings">
+        <Link href="/settings/connections">
           <DropdownMenuItem className={classNames?.content?.menuItem}>
             <SettingsIcon className="mr-2 h-4 w-4" />
             Settings

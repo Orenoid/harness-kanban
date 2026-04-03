@@ -6,6 +6,13 @@ import {
 } from './apis/agent'
 import { createSessionHandler, createSignOutHandler } from './apis/auth'
 import {
+  createDeleteGithubConnectionHandler,
+  createGithubBranchesHandler,
+  createGithubConnectionHandler,
+  createGithubRepositoriesHandler,
+  createUpdateGithubConnectionHandler,
+} from './apis/github'
+import {
   createIssuesHandler,
   createMockIssues,
   createStatusActionsHandler,
@@ -25,14 +32,26 @@ type MswHandler =
   | ReturnType<typeof createIssuesHandler>
   | ReturnType<typeof createUpdateIssueHandler>
   | ReturnType<typeof createStatusActionsHandler>
+  | ReturnType<typeof createDeleteGithubConnectionHandler>
+  | ReturnType<typeof createGithubBranchesHandler>
+  | ReturnType<typeof createGithubConnectionHandler>
+  | ReturnType<typeof createGithubRepositoriesHandler>
+  | ReturnType<typeof createUpdateGithubConnectionHandler>
   | ReturnType<typeof createPropertiesHandler>
   | ReturnType<typeof createProjectsHandler>
   | ReturnType<typeof createUsersHandler>
 
-type MswHandlerGroupKey = 'auth' | 'properties' | 'issues' | 'projects' | 'users' | 'agent'
+type MswHandlerGroupKey = 'auth' | 'properties' | 'issues' | 'projects' | 'users' | 'agent' | 'github'
 
 export const defaultMswHandlerGroups: Record<MswHandlerGroupKey, MswHandler[]> = {
   auth: [createSessionHandler(), createSignOutHandler()],
+  github: [
+    createGithubConnectionHandler(),
+    createUpdateGithubConnectionHandler(),
+    createDeleteGithubConnectionHandler(),
+    createGithubRepositoriesHandler(),
+    createGithubBranchesHandler(),
+  ],
   properties: [createPropertiesHandler()],
   issues: (() => {
     const issues = createMockIssues()

@@ -1,5 +1,6 @@
 import { AuthModule } from '@/auth/auth.module'
 import { DatabaseModule } from '@/database/database.module'
+import { GithubModule } from '@/github/github.module'
 import { HarnessKanbanModule } from '@/harness-kanban/harness-kanban.module'
 import { HealthModule } from '@/health/health.module'
 import { IssueModule } from '@/issue/issue.module'
@@ -24,6 +25,7 @@ import { getAuth } from './auth/auth.js'
     DatabaseModule,
     HealthModule,
     HarnessKanbanModule,
+    GithubModule,
     AuthModule,
     ProjectModule,
     PropertyModule,

@@ -167,6 +167,7 @@ export const Default: Story = {
     const harnessKanbanLink = ownerDocument.querySelector('[aria-label="Harness Kanban"]')
     const issuesLink = ownerDocument.querySelector('[aria-label="Issues"]')
     const projectsLink = ownerDocument.querySelector('[aria-label="Projects"]')
+    const settingsLink = ownerDocument.querySelector('[aria-label="Settings"]')
     const themeButton = ownerDocument.querySelector('[aria-label="Toggle theme"]') as HTMLElement | null
     const notificationButton = ownerDocument.querySelector('[aria-label="Notifications"]') as HTMLElement | null
     const userButton = ownerDocument.querySelector('[aria-haspopup="menu"]') as HTMLElement | null
@@ -174,11 +175,24 @@ export const Default: Story = {
     assertElement(harnessKanbanLink, 'Expected the Harness Kanban logo link to render.')
     assertElement(!issuesLink, 'Expected the Issues icon link to be hidden.')
     assertElement(projectsLink, 'Expected the Projects icon link to render.')
+    assertElement(settingsLink, 'Expected the Settings icon link to render.')
     assertElement(projectsLink?.getAttribute('aria-current') === 'page', 'Expected Projects to be the active route.')
     assertElement(themeButton, 'Expected the theme toggle button to render.')
     assertElement(notificationButton, 'Expected the notification trigger button to render.')
     assertElement(canvasElement.textContent?.includes('3'), 'Expected the unread count badge to render.')
     assertElement(userButton, 'Expected the account trigger button to render.')
+    assertElement(
+      settingsLink?.parentElement === themeButton?.parentElement &&
+        settingsLink?.parentElement === userButton?.parentElement,
+      'Expected settings, theme, and user controls to share the bottom control stack.',
+    )
+
+    const bottomControls = Array.from(themeButton?.parentElement?.children ?? [])
+    assertElement(
+      bottomControls.indexOf(userButton!) < bottomControls.indexOf(settingsLink!) &&
+        bottomControls.indexOf(settingsLink!) < bottomControls.indexOf(themeButton!),
+      'Expected Settings to appear between the user avatar and theme toggle.',
+    )
 
     const getThemeIconClassName = () =>
       ownerDocument.querySelector('[aria-label="Toggle theme"] svg')?.getAttribute('class') ?? ''
@@ -223,6 +237,21 @@ export const ProjectsActive: Story = {
       const tooltip = ownerDocument.querySelector('[role="tooltip"]')
       return Boolean(tooltip?.textContent?.includes('Projects'))
     })
+  },
+}
+
+export const SettingsActive: Story = {
+  render: () => <InteractiveSidebarStory pathname="/settings/connections" initialTheme="light" />,
+  play: async () => {
+    const ownerDocument = document
+    await waitForCondition(() => Boolean(ownerDocument.querySelector('[aria-label="Settings"]')))
+
+    const settingsLink = ownerDocument.querySelector('[aria-label="Settings"]') as HTMLElement | null
+    if (!settingsLink) {
+      throw new Error('Expected the Settings icon link to render.')
+    }
+
+    assertElement(settingsLink.getAttribute('aria-current') === 'page', 'Expected Settings to be the active route.')
   },
 }
 

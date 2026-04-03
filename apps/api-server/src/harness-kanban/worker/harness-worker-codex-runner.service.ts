@@ -180,25 +180,12 @@ export class HarnessWorkerCodexRunnerService {
   private async runWorkspaceCommandSafely(workspaceName: string, command: string, label: string) {
     try {
       return await this.devpodService.runWorkspaceCommand(workspaceName, command, {
-        forwardEnv: this.buildForwardedEnv(),
         label,
         timeoutMs: this.codexTimeoutMs,
       })
     } catch (error) {
       throw new Error(this.sanitizeExecutionError(error))
     }
-  }
-
-  private buildForwardedEnv(): Record<string, string> {
-    const forwardedEnv: Record<string, string> = {}
-    const githubToken = this.configService.get<string>('GITHUB_TOKEN')?.trim()
-
-    if (githubToken) {
-      forwardedEnv.GITHUB_TOKEN = githubToken
-      forwardedEnv.GH_TOKEN = githubToken
-    }
-
-    return forwardedEnv
   }
 
   private parseCodexExecutionResult(rawOutput: string): HarnessWorkerCodexExecutionEnvelope {
@@ -376,10 +363,10 @@ export class HarnessWorkerCodexRunnerService {
   }
 
   private getSensitiveValues(): string[] {
-    return [
-      this.configService.get<string>('GITHUB_TOKEN')?.trim(),
-      this.configService.get<string>('CODEX_AUTH_JSON')?.trim(),
-    ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+    return [this.configService.get<string>('CODEX_AUTH_JSON')?.trim()].filter(
+      (value, index, values): value is string =>
+        typeof value === 'string' && value.length > 0 && values.indexOf(value) === index,
+    )
   }
 
   private extractProcessOutput(error: unknown): string {

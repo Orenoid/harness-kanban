@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { PrismaService } from '@/database/prisma.service'
+import { GithubService } from '@/github/github.service'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@repo/database'
@@ -144,7 +145,7 @@ type HarnessWorkerDevpodMetadata = {
 }
 
 const DEFAULT_DEVPOD_FALLBACK_IMAGE = 'mcr.microsoft.com/devcontainers/base:ubuntu'
-const DEFAULT_GITHUB_USERNAME = 'x-access-token'
+const DEFAULT_GIT_CREDENTIAL_USERNAME = 'x-access-token'
 const DEFAULT_GIT_COMMIT_EMAIL = 'bot_code_bot@harness-kanban.local'
 const DEFAULT_GIT_COMMIT_NAME = 'Code Bot'
 const PASSTHROUGH_ENV_KEYS = [
@@ -172,6 +173,7 @@ export class HarnessWorkerDevpodService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly toolchainService: HarnessWorkerToolchainService,
+    private readonly githubService: GithubService,
   ) {}
 
   getWorkspaceNameForIssue(issueId: number): string {
@@ -187,9 +189,12 @@ export class HarnessWorkerDevpodService {
       return null
     }
 
-    const token = this.configService.get<string>('GITHUB_TOKEN')?.trim()
-    if (!token) {
-      this.logger.error(`Cannot create DevPod workspace for issue ${issueId}: GITHUB_TOKEN is not configured`)
+    let token: string
+    try {
+      token = await this.githubService.getTokenForWorkspace(workspaceId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(`Cannot create DevPod workspace for issue ${issueId}: ${message}`)
       return null
     }
 
@@ -819,7 +824,7 @@ export class HarnessWorkerDevpodService {
     const directory = await mkdtemp(join(tmpdir(), 'harness-kanban-devpod-git-config-'))
     const path = join(directory, 'gitconfig')
     const credentialsPath = join(directory, 'credentials')
-    const githubUsername = this.configService.get<string>('GITHUB_USERNAME')?.trim() || DEFAULT_GITHUB_USERNAME
+    const githubUsername = DEFAULT_GIT_CREDENTIAL_USERNAME
 
     await writeFile(credentialsPath, this.buildGitCredentialsContent(githubRepoUrl, githubUsername, token), 'utf8')
     await writeFile(path, this.buildGitConfigContent(githubRepoUrl, githubUsername, credentialsPath), 'utf8')
@@ -889,7 +894,7 @@ export class HarnessWorkerDevpodService {
     const parsed = new URL(githubRepoUrl)
     const sourceOrigin = `${parsed.protocol}//${parsed.host}/`
     const sshOrigin = `ssh://git@${parsed.host}/`
-    const githubUsername = this.configService.get<string>('GITHUB_USERNAME')?.trim() || DEFAULT_GITHUB_USERNAME
+    const githubUsername = DEFAULT_GIT_CREDENTIAL_USERNAME
     const authenticatedOrigin = new URL(sourceOrigin)
 
     authenticatedOrigin.username = githubUsername

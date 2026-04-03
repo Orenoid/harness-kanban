@@ -3,6 +3,7 @@
 import { LoaderCircle } from 'lucide-react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
+import Link from 'next/link'
 import React, { useEffect, useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { useGithubConnection } from '@/github/hooks/use-github-connection'
+import { useGithubBranches, useGithubRepositories } from '@/github/hooks/use-github-repositories'
 import { cn } from '@/lib/shadcn/utils'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { isSupportedGithubRepoReference } from '@repo/shared'
@@ -21,6 +24,7 @@ import {
   projectMcpConfigSchema,
   UpdateProjectInput,
 } from '@repo/shared/project/types'
+import { ProjectSearchSelect } from './project-search-select'
 
 const MCP_CONFIG_PLACEHOLDER = `{
   "docs": {
@@ -83,12 +87,12 @@ const projectFormSchema = z.object({
   githubRepoUrl: z
     .string()
     .trim()
-    .min(1, 'GitHub repository URL is required')
-    .refine(isSupportedGithubRepoReference, 'Enter a valid GitHub repository URL or SSH path'),
+    .min(1, 'Select a GitHub repository')
+    .refine(isSupportedGithubRepoReference, 'Select a GitHub repository'),
   repoBaseBranch: z
     .string()
     .trim()
-    .min(1, 'Repository base branch is required')
+    .min(1, 'Select a repository base branch')
     .max(255, 'Repository base branch must be at most 255 characters'),
   checkCiCd: z.boolean(),
   mcpConfigText: z.string().superRefine((value, ctx) => {
@@ -163,16 +167,74 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   })
 
   const {
+    clearErrors,
     control,
     formState: { errors },
     handleSubmit,
     register,
     reset,
+    setValue,
+    watch,
   } = form
+  const { data: githubConnection, isLoading: isGithubConnectionLoading } = useGithubConnection(mode === 'create')
+  const {
+    data: githubRepositories = [],
+    isLoading: isGithubRepositoriesLoading,
+    error: githubRepositoriesError,
+  } = useGithubRepositories(mode === 'create' && !!githubConnection?.hasToken)
+  const selectedRepoUrl = watch('githubRepoUrl')
+  const selectedBranch = watch('repoBaseBranch')
+  const selectedRepo = useMemo(
+    () => githubRepositories.find(repository => repository.githubRepoUrl === selectedRepoUrl) ?? null,
+    [githubRepositories, selectedRepoUrl],
+  )
+  const {
+    data: githubBranches = [],
+    isLoading: isGithubBranchesLoading,
+    error: githubBranchesError,
+  } = useGithubBranches(
+    selectedRepo?.fullName ?? '',
+    mode === 'create' && !!selectedRepo && !!githubConnection?.hasToken,
+  )
+  const hasGithubToken = Boolean(githubConnection?.hasToken)
 
   useEffect(() => {
     reset(defaultValues)
   }, [defaultValues, reset])
+
+  useEffect(() => {
+    register('githubRepoUrl')
+    register('repoBaseBranch')
+  }, [register])
+
+  useEffect(() => {
+    if (mode !== 'create' || !selectedRepo) {
+      return
+    }
+
+    setValue('repoBaseBranch', selectedRepo.defaultBranch, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    clearErrors('githubRepoUrl')
+  }, [clearErrors, mode, selectedRepo, setValue])
+
+  useEffect(() => {
+    if (mode !== 'create' || !selectedRepo || githubBranches.length === 0) {
+      return
+    }
+
+    const selectedBranchStillExists = githubBranches.some(branch => branch.name === selectedBranch)
+    if (selectedBranchStillExists) {
+      return
+    }
+
+    const defaultBranch = githubBranches.find(branch => branch.isDefault)?.name ?? selectedRepo.defaultBranch
+    setValue('repoBaseBranch', defaultBranch, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+  }, [githubBranches, mode, selectedBranch, selectedRepo, setValue])
 
   const handleFormSubmit = async (values: ProjectFormValues) => {
     const parsedMcpConfig = parseProjectMcpConfigText(values.mcpConfigText)
@@ -202,6 +264,8 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   }
 
   const repoFieldsDisabled = mode === 'update'
+  const showSettingsPrompt = mode === 'create' && !isGithubConnectionLoading && !hasGithubToken
+  const submitDisabled = isSubmitting || (mode === 'create' && (!hasGithubToken || isGithubRepositoriesLoading))
 
   return (
     <form onSubmit={handleSubmit(handleFormSubmit)} className={cn('space-y-5', className)}>
@@ -210,6 +274,19 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         <Input id={`${mode}-project-name`} {...register('name')} placeholder="Fraud detection service" />
         {errors.name?.message ? <p className="text-sm text-red-500">{errors.name.message}</p> : null}
       </div>
+
+      {showSettingsPrompt ? (
+        <div className="rounded-xl bg-amber-50/60 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+          <p className="font-medium">GitHub connection required</p>
+          <p className="mt-1">
+            Add a GitHub token in{' '}
+            <Link href="/settings/connections" className="underline underline-offset-4">
+              Settings / Connections
+            </Link>{' '}
+            before creating a project.
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid gap-5 md:grid-cols-2">
         <div className="space-y-2">
@@ -228,12 +305,28 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
             />
           ) : (
             <>
-              <Label htmlFor={`${mode}-project-repo`}>GitHub repository URL</Label>
-              <Input
+              <Label htmlFor={`${mode}-project-repo`}>GitHub repository</Label>
+              <ProjectSearchSelect
                 id={`${mode}-project-repo`}
-                {...register('githubRepoUrl')}
-                placeholder="https://github.com/org/repo or git@github.com:org/repo.git"
+                value={selectedRepoUrl}
+                onValueChange={value => {
+                  setValue('githubRepoUrl', value, { shouldDirty: true, shouldValidate: true })
+                }}
+                options={githubRepositories.map(repository => ({
+                  value: repository.githubRepoUrl,
+                  label: repository.fullName,
+                  description: `Default branch: ${repository.defaultBranch}`,
+                }))}
+                placeholder={showSettingsPrompt ? 'Configure GitHub in Settings first' : 'Select a repository'}
+                searchPlaceholder="Search repositories"
+                emptyText={showSettingsPrompt ? 'Configure GitHub in Settings first' : 'No repositories found'}
+                loading={isGithubRepositoriesLoading}
+                loadingText="Loading..."
+                disabled={showSettingsPrompt || isGithubRepositoriesLoading}
               />
+              {githubRepositoriesError instanceof Error ? (
+                <p className="text-sm text-red-500">{githubRepositoriesError.message}</p>
+              ) : null}
               {errors.githubRepoUrl?.message ? (
                 <p className="text-sm text-red-500">{errors.githubRepoUrl.message}</p>
               ) : null}
@@ -250,7 +343,39 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           ) : (
             <>
               <Label htmlFor={`${mode}-project-branch`}>Repository base branch</Label>
-              <Input id={`${mode}-project-branch`} {...register('repoBaseBranch')} placeholder="main" />
+              {selectedRepo && githubBranchesError instanceof Error ? (
+                <>
+                  <Input id={`${mode}-project-branch`} value={selectedBranch} readOnly />
+                  <p className="text-muted-foreground text-sm">
+                    Could not load branches. The project will use the repository default branch.
+                  </p>
+                </>
+              ) : (
+                <ProjectSearchSelect
+                  id={`${mode}-project-branch`}
+                  value={selectedBranch}
+                  onValueChange={value => {
+                    setValue('repoBaseBranch', value, { shouldDirty: true, shouldValidate: true })
+                  }}
+                  options={githubBranches.map(branch => ({
+                    value: branch.name,
+                    label: branch.name,
+                    description: branch.isDefault ? 'Default branch' : undefined,
+                  }))}
+                  placeholder={
+                    selectedRepo
+                      ? isGithubBranchesLoading
+                        ? 'Loading branches...'
+                        : 'Select a branch'
+                      : 'Select a repository first'
+                  }
+                  searchPlaceholder="Search branches"
+                  emptyText={selectedRepo ? 'No branches found' : 'Select a repository first'}
+                  loading={selectedRepo ? isGithubBranchesLoading : false}
+                  loadingText="Loading..."
+                  disabled={!selectedRepo || isGithubBranchesLoading}
+                />
+              )}
               {errors.repoBaseBranch?.message ? (
                 <p className="text-sm text-red-500">{errors.repoBaseBranch.message}</p>
               ) : null}
@@ -305,7 +430,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
             Cancel
           </Button>
         ) : null}
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" disabled={submitDisabled}>
           {isSubmitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
           {submitLabel}
         </Button>

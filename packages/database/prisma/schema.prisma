@@ -203,6 +203,16 @@ model notification_delivery {
   @@map("notification_delivery")
 }
 
+model workspace_github_connection {
+  workspace_id            String   @id
+  github_token_encrypted  String
+  github_token_updated_at DateTime
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  @@map("workspace_github_connection")
+}
+
 model User {
   id            String    @id
   name          String

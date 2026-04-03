@@ -13,6 +13,7 @@ export * from './issue/constants'
 
 // Project exports
 export * from './project/types'
+export * from './github/types'
 
 // Notification exports
 export * from './notification/constants'

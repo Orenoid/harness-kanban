@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { PrismaService } from '@/database/prisma.service'
+import { GithubService } from '@/github/github.service'
 import { ConfigService } from '@nestjs/config'
 import { HarnessWorkerDevpodService } from '../harness-worker-devpod.service'
 import { HarnessWorkerToolchainService } from '../harness-worker-toolchain.service'
@@ -9,6 +10,7 @@ import { HarnessWorkerToolchainService } from '../harness-worker-toolchain.servi
 describe('HarnessWorkerDevpodService', () => {
   let service: HarnessWorkerDevpodService
   let configService: jest.Mocked<ConfigService>
+  let githubService: jest.Mocked<GithubService>
   let toolchainService: jest.Mocked<HarnessWorkerToolchainService>
   let findProjectBindingMock: jest.Mock
   let findProjectMock: jest.Mock
@@ -18,6 +20,9 @@ describe('HarnessWorkerDevpodService', () => {
     configService = {
       get: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>
+    githubService = {
+      getTokenForWorkspace: jest.fn(),
+    } as unknown as jest.Mocked<GithubService>
     toolchainService = {
       resolveCodexToolchainArtifact: jest.fn(),
     } as unknown as jest.Mocked<HarnessWorkerToolchainService>
@@ -40,7 +45,7 @@ describe('HarnessWorkerDevpodService', () => {
       },
     } as unknown as jest.Mocked<PrismaService>
 
-    service = new HarnessWorkerDevpodService(prismaService, configService, toolchainService)
+    service = new HarnessWorkerDevpodService(prismaService, configService, toolchainService, githubService)
   })
 
   it('returns null when the issue is not bound to a project', async () => {
@@ -50,7 +55,7 @@ describe('HarnessWorkerDevpodService', () => {
     expect(findProjectMock).not.toHaveBeenCalled()
   })
 
-  it('returns null when GITHUB_TOKEN is missing', async () => {
+  it('returns null when the workspace GitHub token is missing', async () => {
     findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
     findProjectMock.mockResolvedValue({
       env_config: null,
@@ -58,7 +63,7 @@ describe('HarnessWorkerDevpodService', () => {
       mcp_config: null,
       repo_base_branch: 'main',
     })
-    configService.get.mockImplementation(() => undefined)
+    githubService.getTokenForWorkspace.mockRejectedValue(new Error('GitHub token is not configured.'))
 
     await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBeNull()
   })
@@ -71,26 +76,12 @@ describe('HarnessWorkerDevpodService', () => {
       mcp_config: null,
       repo_base_branch: 'main',
     })
-    configService.get.mockImplementation((key: string) => {
-      if (key === 'GITHUB_TOKEN') {
-        return 'github-token-value'
-      }
-
-      return undefined
-    })
+    githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
 
     await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBeNull()
   })
 
   it('writes credential helper config for DevPod git authentication', async () => {
-    configService.get.mockImplementation((key: string) => {
-      if (key === 'GITHUB_USERNAME') {
-        return 'x-access-token'
-      }
-
-      return undefined
-    })
-
     const prepared = await (
       service as unknown as {
         prepareGitConfigFile: (
@@ -149,16 +140,13 @@ describe('HarnessWorkerDevpodService', () => {
       repo_base_branch: 'feature/planning',
     })
     configService.get.mockImplementation((key: string) => {
-      if (key === 'GITHUB_TOKEN') {
-        return 'github-token-value'
-      }
-
       if (key === 'CODEX_AUTH_JSON') {
         return codexAuthJson
       }
 
       return undefined
     })
+    githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
     toolchainService.resolveCodexToolchainArtifact.mockResolvedValue({
       archivePath: '/opt/harness-kanban/toolchains/codex/0.116.0/codex-toolchain-linux-x64.tar.gz',
       kind: 'codex',
@@ -428,8 +416,6 @@ describe('HarnessWorkerDevpodService', () => {
     expect(gitAuthCommand).toContain('ssh://git@github.com/')
 
     const executeOptions = executeCommandSpy.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv }
-    expect(executeOptions.env.GITHUB_TOKEN).toBeUndefined()
-    expect(executeOptions.env.GITHUB_USERNAME).toBeUndefined()
     expect(executeOptions.env.CODEX_AUTH_JSON).toBeUndefined()
     expect(updateWorkerMock).toHaveBeenCalledWith({
       where: {
