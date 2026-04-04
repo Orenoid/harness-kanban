@@ -1,3 +1,4 @@
+import { CodingAgentModule } from '@/coding-agent/coding-agent.module'
 import { DatabaseModule } from '@/database/database.module'
 import { PRE_CREATE_ISSUE_HOOKS, PRE_UPDATE_ISSUE_HOOKS } from '@/issue/constants/hook.constants'
 import { IssueModule } from '@/issue/issue.module'
@@ -8,7 +9,7 @@ import { CodeBotAutoQueueListener, CodeBotIssueTriggerListener } from './kanban/
 
 @Global()
 @Module({
-  imports: [DatabaseModule, IssueModule, PgmqModule],
+  imports: [CodingAgentModule, DatabaseModule, IssueModule, PgmqModule],
   providers: [
     CodeBotCreateHook,
     CodeBotAssigneeHook,

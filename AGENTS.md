@@ -380,7 +380,6 @@ The root `docker-compose.yml` can run PostgreSQL, MinIO, the API server, the web
 - Compose services read their environment from the service-specific files under `apps/`.
 - `api`, `web`, and `worker` pull prebuilt images from GHCR using the repository's published `latest` tags.
 - The worker container needs a reachable Docker socket mount so DevPod can create host-managed workspaces.
-- Provide worker Codex auth through `CODEX_AUTH_JSON`.
 - If web uploads need to be opened from the browser, set `MINIO_PUBLIC_BASE_URL` to a browser-reachable URL instead of an internal container hostname.
 
 #### Agent Tool Implementation

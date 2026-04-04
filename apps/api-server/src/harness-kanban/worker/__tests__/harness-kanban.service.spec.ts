@@ -1,3 +1,4 @@
+import { CodingAgentService } from '@/coding-agent/coding-agent.service'
 import { IssueService } from '@/issue/issue.service'
 import { PgmqService } from '@/pgmq/pgmq.service'
 import { SystemBotId } from '@/user/constants/user.constants'
@@ -10,6 +11,7 @@ import { HarnessWorkerRegistryService } from '../harness-worker-registry.service
 describe('HarnessKanbanService', () => {
   let service: HarnessKanbanService
   let registryService: jest.Mocked<HarnessWorkerRegistryService>
+  let codingAgentService: jest.Mocked<CodingAgentService>
   let issueService: jest.Mocked<IssueService>
   let pgmqService: jest.Mocked<PgmqService>
   let devpodService: jest.Mocked<HarnessWorkerDevpodService>
@@ -25,6 +27,24 @@ describe('HarnessKanbanService', () => {
       claimNextQueuedIssue: jest.fn(),
       releaseClaim: jest.fn(),
     } as unknown as jest.Mocked<HarnessWorkerRegistryService>
+
+    codingAgentService = {
+      ensureIssueCodingAgentSnapshot: jest.fn().mockResolvedValue({
+        id: 'snapshot-1',
+        name: 'Primary Codex',
+        type: 'codex',
+        settings: {
+          authMode: 'api-key',
+          apiKey: 'sk-test-123',
+          model: 'gpt-5.3-codex',
+          reasoningEffort: 'medium',
+        },
+        isDefault: true,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+      }),
+      clearIssueCodingAgentSnapshot: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<CodingAgentService>
 
     issueService = {
       updateIssue: jest.fn(),
@@ -52,7 +72,14 @@ describe('HarnessKanbanService', () => {
       applyRequestedCodeChanges: jest.fn(),
     } as unknown as jest.Mocked<HarnessWorkerCodexWorkflowService>
 
-    service = new HarnessKanbanService(registryService, issueService, pgmqService, devpodService, codexWorkflowService)
+    service = new HarnessKanbanService(
+      registryService,
+      codingAgentService,
+      issueService,
+      pgmqService,
+      devpodService,
+      codexWorkflowService,
+    )
   })
 
   it('moves a claimed Code Bot issue to planning, creates the workspace, and starts planning workflow', async () => {
@@ -86,6 +113,7 @@ describe('HarnessKanbanService', () => {
       },
     )
     expect(devpodService.createWorkspaceForIssue).toHaveBeenCalledWith(101, 'workspace-1')
+    expect(codingAgentService.ensureIssueCodingAgentSnapshot).toHaveBeenCalledWith(101, 'codex')
     expect(codexWorkflowService.startPlanning).toHaveBeenCalledWith({
       issueId: 101,
       workspaceId: 'workspace-1',
@@ -107,6 +135,25 @@ describe('HarnessKanbanService', () => {
     await (service as unknown as { runClaimPollingOnce(): Promise<void> }).runClaimPollingOnce()
 
     expect(registryService.releaseClaim).toHaveBeenCalledTimes(1)
+    expect(devpodService.createWorkspaceForIssue).not.toHaveBeenCalled()
+    expect(codexWorkflowService.startPlanning).not.toHaveBeenCalled()
+  })
+
+  it('does not start planning when the coding agent snapshot cannot be created', async () => {
+    registryService.claimNextQueuedIssue.mockResolvedValue({
+      issueId: 404,
+      workspaceId: 'workspace-1',
+    })
+    issueService.updateIssue.mockResolvedValue({
+      success: true,
+      issueId: 404,
+    })
+    codingAgentService.ensureIssueCodingAgentSnapshot.mockRejectedValue(
+      new Error('No coding agent is configured for type "codex".'),
+    )
+
+    await (service as unknown as { runClaimPollingOnce(): Promise<void> }).runClaimPollingOnce()
+
     expect(devpodService.createWorkspaceForIssue).not.toHaveBeenCalled()
     expect(codexWorkflowService.startPlanning).not.toHaveBeenCalled()
   })
@@ -205,6 +252,7 @@ describe('HarnessKanbanService', () => {
 
     expect(devpodService.getWorkspaceNameForIssue).toHaveBeenCalledWith(717)
     expect(devpodService.deleteWorkspace).toHaveBeenCalledWith('harness-kanban-issue-717')
+    expect(codingAgentService.clearIssueCodingAgentSnapshot).toHaveBeenCalledWith(717)
     expect(registryService.releaseClaim).toHaveBeenCalledTimes(1)
     expect(codexWorkflowService.startImplementation).not.toHaveBeenCalled()
     expect(archiveMessageMock).toHaveBeenCalledWith('harness_issue_dispatch_717', 55)

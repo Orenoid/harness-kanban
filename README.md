@@ -40,10 +40,6 @@ cp apps/web/.env.example apps/web/.env
 cp apps/api-server/.env.worker.example apps/api-server/.env.worker
 ```
 
-Then fill `CODEX_AUTH_JSON` in `apps/api-server/.env.worker`.
-
-- `CODEX_AUTH_JSON`: Read your local Codex auth file from `~/.codex/auth.json` and compress it into a single line before putting it into `.env.worker`, for example: `cat ~/.codex/auth.json | jq -c .`
-
 Start the stack:
 
 ```bash

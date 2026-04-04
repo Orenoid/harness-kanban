@@ -12,6 +12,7 @@ export {
   createStatusActionsHandler,
   createUpdateIssueHandler,
 } from './apis/issues'
+export { createCodingAgentHandlers, createMockCodingAgents } from './apis/coding-agents'
 export {
   createDeleteGithubConnectionHandler,
   createGithubBranchesHandler,

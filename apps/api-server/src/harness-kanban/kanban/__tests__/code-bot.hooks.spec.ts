@@ -3,6 +3,7 @@ import { SystemPropertyId } from '@repo/shared/property/constants'
 import {
   CANCELED_STATUS_ID,
   CODE_BOT_ASSIGNMENT_ERROR,
+  CODE_BOT_CODING_AGENT_CONFIGURATION_ERROR,
   CODE_BOT_REASSIGNMENT_ERROR,
   CODE_BOT_STATUS_ERROR,
   TODO_STATUS_ID,
@@ -10,9 +11,22 @@ import {
 import { CodeBotAssigneeHook, CodeBotCreateHook, CodeBotStatusHook } from '../hooks/issue-code-bot.hooks'
 
 describe('Code Bot hooks', () => {
-  const createHook = new CodeBotCreateHook()
-  const assigneeHook = new CodeBotAssigneeHook()
-  const statusHook = new CodeBotStatusHook()
+  let createHook: CodeBotCreateHook
+  let assigneeHook: CodeBotAssigneeHook
+  let statusHook: CodeBotStatusHook
+  let hasCodingAgentConfiguredMock: jest.Mock
+
+  beforeEach(() => {
+    hasCodingAgentConfiguredMock = jest.fn().mockResolvedValue(true)
+
+    const codingAgentService = {
+      hasCodingAgentConfigured: hasCodingAgentConfiguredMock,
+    } as any
+
+    createHook = new CodeBotCreateHook(codingAgentService)
+    assigneeHook = new CodeBotAssigneeHook(codingAgentService)
+    statusHook = new CodeBotStatusHook()
+  })
 
   it('allows create when Code Bot is assigned with Todo status', async () => {
     await expect(
@@ -28,6 +42,8 @@ describe('Code Bot hooks', () => {
           })[propertyId],
       }),
     ).resolves.toEqual({ valid: true })
+
+    expect(hasCodingAgentConfiguredMock).toHaveBeenCalledWith('codex')
   })
 
   it('rejects create when Code Bot is assigned with a non-Todo status', async () => {
@@ -47,6 +63,29 @@ describe('Code Bot hooks', () => {
       valid: false,
       errors: [CODE_BOT_ASSIGNMENT_ERROR],
     })
+
+    expect(hasCodingAgentConfiguredMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects create when Code Bot is assigned without any coding agent configuration', async () => {
+    hasCodingAgentConfiguredMock.mockResolvedValue(false)
+
+    await expect(
+      createHook.execute({
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        propertyMap: [],
+        propertyValues: [],
+        getRequestedValue: propertyId =>
+          ({
+            [SystemPropertyId.ASSIGNEE]: SystemBotId.CODE_BOT,
+            [SystemPropertyId.STATUS]: TODO_STATUS_ID,
+          })[propertyId],
+      }),
+    ).resolves.toEqual({
+      valid: false,
+      errors: [CODE_BOT_CODING_AGENT_CONFIGURATION_ERROR],
+    })
   })
 
   it('allows assigning Code Bot when the current issue status is Todo', async () => {
@@ -64,6 +103,8 @@ describe('Code Bot hooks', () => {
         getNextSetValue: propertyId => (propertyId === SystemPropertyId.ASSIGNEE ? SystemBotId.CODE_BOT : undefined),
       }),
     ).resolves.toEqual({ valid: true })
+
+    expect(hasCodingAgentConfiguredMock).toHaveBeenCalledWith('codex')
   })
 
   it('rejects assigning Code Bot when the current issue status is Queued', async () => {
@@ -84,6 +125,8 @@ describe('Code Bot hooks', () => {
       valid: false,
       errors: [CODE_BOT_REASSIGNMENT_ERROR],
     })
+
+    expect(hasCodingAgentConfiguredMock).not.toHaveBeenCalled()
   })
 
   it('allows reassigning Code Bot when the current issue status is Planning', async () => {
@@ -101,6 +144,28 @@ describe('Code Bot hooks', () => {
         getNextSetValue: propertyId => (propertyId === SystemPropertyId.ASSIGNEE ? SystemBotId.CODE_BOT : undefined),
       }),
     ).resolves.toEqual({ valid: true })
+  })
+
+  it('rejects assigning Code Bot when no coding agent configuration exists', async () => {
+    hasCodingAgentConfiguredMock.mockResolvedValue(false)
+
+    await expect(
+      assigneeHook.execute({
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        issueId: 1,
+        issue: { id: 1, workspace_id: 'workspace-1' },
+        operations: [],
+        propertyMap: [],
+        originalPropertyValues: new Map([[SystemPropertyId.STATUS, TODO_STATUS_ID]]),
+        getCurrentValue: propertyId => (propertyId === SystemPropertyId.STATUS ? TODO_STATUS_ID : null),
+        getOperation: () => undefined,
+        getNextSetValue: propertyId => (propertyId === SystemPropertyId.ASSIGNEE ? SystemBotId.CODE_BOT : undefined),
+      }),
+    ).resolves.toEqual({
+      valid: false,
+      errors: [CODE_BOT_CODING_AGENT_CONFIGURATION_ERROR],
+    })
   })
 
   it('allows reassigning Code Bot when the current issue status is In Progress', async () => {

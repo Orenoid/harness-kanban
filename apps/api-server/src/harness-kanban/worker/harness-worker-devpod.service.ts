@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { CodingAgentService } from '@/coding-agent/coding-agent.service'
 import { PrismaService } from '@/database/prisma.service'
 import { GithubService } from '@/github/github.service'
 import { Injectable, Logger } from '@nestjs/common'
@@ -18,7 +19,11 @@ import {
   ProjectMcpServerConfig,
 } from '@repo/shared/project/types'
 import { SystemPropertyId } from '@repo/shared/property/constants'
-import { resolveCodexAuthJson } from './harness-worker-codex-auth'
+import {
+  getCodexAuthSensitiveValues,
+  resolveCodexAuthConfig,
+  ResolvedCodexAuthConfig,
+} from './harness-worker-codex-auth'
 import { HarnessWorkerToolchainService } from './harness-worker-toolchain.service'
 import type { ExecFileOptions } from 'node:child_process'
 import type { HarnessWorkerToolchainPlatform } from './harness-worker-toolchain.service'
@@ -172,6 +177,7 @@ export class HarnessWorkerDevpodService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly codingAgentService: CodingAgentService,
     private readonly toolchainService: HarnessWorkerToolchainService,
     private readonly githubService: GithubService,
   ) {}
@@ -198,20 +204,21 @@ export class HarnessWorkerDevpodService {
       return null
     }
 
-    let codexAuthJson: string | null = null
+    let codexAuthConfig: ResolvedCodexAuthConfig | null = null
     try {
-      codexAuthJson = await resolveCodexAuthJson(this.configService)
+      codexAuthConfig = await resolveCodexAuthConfig(this.codingAgentService, issueId)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.logger.error(`Cannot create DevPod workspace for issue ${issueId}: failed to load Codex auth: ${message}`)
       return null
     }
 
-    if (!codexAuthJson) {
-      this.logger.error(`Cannot create DevPod workspace for issue ${issueId}: CODEX_AUTH_JSON is not configured`)
+    if (!codexAuthConfig) {
+      this.logger.error(
+        `Cannot create DevPod workspace for issue ${issueId}: no usable Codex coding agent is configured`,
+      )
       return null
     }
-    const codexAuthJsonBase64 = Buffer.from(codexAuthJson, 'utf8').toString('base64')
 
     const workspaceName = this.buildWorkspaceName(issueId)
     const cloneUrl = this.normalizeCloneUrl(repository.githubRepoUrl)
@@ -249,14 +256,7 @@ export class HarnessWorkerDevpodService {
       )
 
       this.logger.log(`Injecting Codex toolchain into workspace ${workspaceName}`)
-      await this.initializeWorkspaceCodex(
-        workspaceName,
-        env,
-        cloneUrl,
-        token,
-        codexAuthJsonBase64,
-        repository.mcpConfig,
-      )
+      await this.initializeWorkspaceCodex(workspaceName, env, cloneUrl, token, codexAuthConfig, repository.mcpConfig)
       this.logger.log(`Collecting DevPod metadata for workspace ${workspaceName}`)
       await this.collectAndPersistWorkspaceMetadata(issueId, workspaceName, env)
 
@@ -265,7 +265,7 @@ export class HarnessWorkerDevpodService {
       )
       return workspaceName
     } catch (error) {
-      const sensitiveValues: string[] = [token, codexAuthJson, codexAuthJsonBase64].filter(
+      const sensitiveValues: string[] = [token, ...getCodexAuthSensitiveValues(codexAuthConfig)].filter(
         (value): value is string => typeof value === 'string',
       )
       const message = this.redactSensitiveData(error instanceof Error ? error.message : String(error), sensitiveValues)
@@ -378,7 +378,7 @@ export class HarnessWorkerDevpodService {
     env: NodeJS.ProcessEnv,
     githubRepoUrl: string,
     githubToken: string,
-    codexAuthJsonBase64: string,
+    codexAuthConfig: ResolvedCodexAuthConfig,
     mcpConfig: ProjectMcpConfig | null,
   ): Promise<void> {
     const platform = await this.detectWorkspacePlatform(workspaceName, env)
@@ -386,15 +386,18 @@ export class HarnessWorkerDevpodService {
 
     await this.injectWorkspaceCodexToolchain(workspaceName, env, artifact.archivePath, artifact.version)
 
-    await this.executeWorkspaceCommand(
-      workspaceName,
-      env,
-      `mkdir -p ~/.codex && printf %s ${this.quoteShellArg(codexAuthJsonBase64)} | base64 -d > ~/.codex/auth.json`,
-      {
-        label: 'seed Codex auth.json',
-        maxBuffer: 10 * 1024 * 1024,
-      },
-    )
+    if (codexAuthConfig.authMode === 'auth-json') {
+      const codexAuthJsonBase64 = Buffer.from(codexAuthConfig.authJson, 'utf8').toString('base64')
+      await this.executeWorkspaceCommand(
+        workspaceName,
+        env,
+        `mkdir -p ~/.codex && printf %s ${this.quoteShellArg(codexAuthJsonBase64)} | base64 -d > ~/.codex/auth.json`,
+        {
+          label: 'seed Codex auth.json',
+          maxBuffer: 10 * 1024 * 1024,
+        },
+      )
+    }
 
     await this.configureWorkspaceCodexMcp(workspaceName, env, mcpConfig)
     await this.configureWorkspaceGitIdentity(workspaceName, env)

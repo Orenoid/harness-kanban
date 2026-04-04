@@ -14,6 +14,7 @@ export * from './issue/constants'
 // Project exports
 export * from './project/types'
 export * from './github/types'
+export * from './coding-agent/types'
 
 // Notification exports
 export * from './notification/constants'

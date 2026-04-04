@@ -3,6 +3,7 @@ import { IssueService } from '@/issue/issue.service'
 import { PgmqService } from '@/pgmq/pgmq.service'
 import { SystemBotId } from '@/user/constants/user.constants'
 import { CommonPropertyOperationType, SystemPropertyId } from '@repo/shared/property/constants'
+import { CODE_BOT_CODING_AGENT_CONFIGURATION_ERROR } from '../constants/code-bot.constants'
 import { CodeBotIssueTriggerListener } from '../listeners/issue-code-bot.listeners'
 
 describe('CodeBotIssueTriggerListener', () => {
@@ -184,6 +185,30 @@ describe('CodeBotIssueTriggerListener', () => {
     })
 
     expect(updateIssueMock).not.toHaveBeenCalled()
+    expect(sendMock).not.toHaveBeenCalled()
+  })
+
+  it('does not publish a trigger when reassignment back to Code Bot is rejected', async () => {
+    updateIssueMock.mockResolvedValueOnce({
+      success: false,
+      errors: [CODE_BOT_CODING_AGENT_CONFIGURATION_ERROR],
+    })
+
+    await listener.handleIssueUpdated({
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      issueId: 101,
+      updatedPropertyIds: [SystemPropertyId.STATUS],
+      propertyChanges: [
+        {
+          propertyId: SystemPropertyId.STATUS,
+          previousValue: 'plan_in_review',
+          newValue: 'planning',
+        },
+      ],
+    })
+
+    expect(updateIssueMock).toHaveBeenCalledTimes(1)
     expect(sendMock).not.toHaveBeenCalled()
   })
 })

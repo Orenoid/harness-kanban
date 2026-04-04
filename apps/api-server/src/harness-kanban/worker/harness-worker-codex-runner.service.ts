@@ -1,9 +1,16 @@
 import { z } from 'zod'
 
+import { CodingAgentService } from '@/coding-agent/coding-agent.service'
 import { PrismaService } from '@/database/prisma.service'
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@repo/database'
+import {
+  buildCodexExecArgs,
+  getCodexAuthSensitiveValues,
+  resolveCodexAuthConfig,
+  ResolvedCodexAuthConfig,
+} from './harness-worker-codex-auth'
 import { HarnessWorkerDevpodService } from './harness-worker-devpod.service'
 
 const DEFAULT_CODEX_TIMEOUT_MS = 30 * 60 * 1000
@@ -31,6 +38,7 @@ export class HarnessWorkerCodexRunnerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly codingAgentService: CodingAgentService,
     private readonly devpodService: HarnessWorkerDevpodService,
   ) {
     this.codexTimeoutMs = this.getPositiveInteger('HARNESS_WORKER_CODEX_TIMEOUT_MS', DEFAULT_CODEX_TIMEOUT_MS)
@@ -88,8 +96,14 @@ export class HarnessWorkerCodexRunnerService {
     workspaceName: string
     workflowLabel: string
   }): Promise<HarnessWorkerCodexRunResult> {
+    const codexAuthConfig = await resolveCodexAuthConfig(this.codingAgentService, input.issueId)
+    if (!codexAuthConfig) {
+      throw new Error('No usable Codex coding agent is configured.')
+    }
+
     const result = input.resumeThreadId
       ? await this.executeResumeCodexRun(
+          codexAuthConfig,
           input.workspaceName,
           input.repoRoot,
           input.prompt,
@@ -98,6 +112,7 @@ export class HarnessWorkerCodexRunnerService {
           input.workflowLabel,
         )
       : await this.executeInitialCodexRun(
+          codexAuthConfig,
           input.workspaceName,
           input.repoRoot,
           input.prompt,
@@ -114,11 +129,13 @@ export class HarnessWorkerCodexRunnerService {
     }
 
     if (result.exitCode !== 0) {
-      throw new Error(this.sanitizeCodexFailure(result))
+      throw new Error(this.sanitizeCodexFailure(result, codexAuthConfig))
     }
 
     if (result.finalMessage.trim().length === 0) {
-      throw new Error(this.sanitizeCodexFailure(result, 'Codex execution completed without a final agent message.'))
+      throw new Error(
+        this.sanitizeCodexFailure(result, codexAuthConfig, 'Codex execution completed without a final agent message.'),
+      )
     }
 
     return {
@@ -128,6 +145,7 @@ export class HarnessWorkerCodexRunnerService {
   }
 
   private async executeInitialCodexRun(
+    codexAuthConfig: ResolvedCodexAuthConfig,
     workspaceName: string,
     repoRoot: string,
     prompt: string,
@@ -140,19 +158,20 @@ export class HarnessWorkerCodexRunnerService {
     const result = await this.runWorkspaceCommandSafely(
       workspaceName,
       this.buildCodexCommandScript({
-        command:
-          'codex exec --json --dangerously-bypass-approvals-and-sandbox --output-schema "$tmpdir/output-schema.json" -o "$tmpdir/final-message.json" - < "$tmpdir/prompt.txt"',
+        command: `${this.buildCodexExecCommand(codexAuthConfig)} --json --dangerously-bypass-approvals-and-sandbox --output-schema "$tmpdir/output-schema.json" -o "$tmpdir/final-message.json" - < "$tmpdir/prompt.txt"`,
         promptBase64,
         repoRoot,
         schemaBase64,
       }),
       `run ${workflowLabel} codex exec`,
+      codexAuthConfig,
     )
 
     return this.parseCodexExecutionResult(result.stdout)
   }
 
   private async executeResumeCodexRun(
+    codexAuthConfig: ResolvedCodexAuthConfig,
     workspaceName: string,
     repoRoot: string,
     prompt: string,
@@ -166,25 +185,32 @@ export class HarnessWorkerCodexRunnerService {
     const result = await this.runWorkspaceCommandSafely(
       workspaceName,
       this.buildCodexCommandScript({
-        command: `codex exec --output-schema "$tmpdir/output-schema.json" resume ${this.quoteShellArg(threadId)} --json --dangerously-bypass-approvals-and-sandbox -o "$tmpdir/final-message.json" - < "$tmpdir/prompt.txt"`,
+        command: `${this.buildCodexExecCommand(codexAuthConfig)} --output-schema "$tmpdir/output-schema.json" resume ${this.quoteShellArg(threadId)} --json --dangerously-bypass-approvals-and-sandbox -o "$tmpdir/final-message.json" - < "$tmpdir/prompt.txt"`,
         promptBase64,
         repoRoot,
         schemaBase64,
       }),
       `resume ${workflowLabel} codex exec`,
+      codexAuthConfig,
     )
 
     return this.parseCodexExecutionResult(result.stdout)
   }
 
-  private async runWorkspaceCommandSafely(workspaceName: string, command: string, label: string) {
+  private async runWorkspaceCommandSafely(
+    workspaceName: string,
+    command: string,
+    label: string,
+    codexAuthConfig: ResolvedCodexAuthConfig,
+  ) {
     try {
       return await this.devpodService.runWorkspaceCommand(workspaceName, command, {
+        forwardEnv: codexAuthConfig.authMode === 'api-key' ? { CODEX_API_KEY: codexAuthConfig.apiKey } : undefined,
         label,
         timeoutMs: this.codexTimeoutMs,
       })
     } catch (error) {
-      throw new Error(this.sanitizeExecutionError(error))
+      throw new Error(this.sanitizeExecutionError(error, codexAuthConfig))
     }
   }
 
@@ -256,6 +282,12 @@ export class HarnessWorkerCodexRunnerService {
     return lines.join('\n')
   }
 
+  private buildCodexExecCommand(config: ResolvedCodexAuthConfig): string {
+    return ['codex', 'exec', ...buildCodexExecArgs(config)]
+      .map(value => (value === 'codex' || value === 'exec' ? value : this.quoteShellArg(value)))
+      .join(' ')
+  }
+
   private async persistCodexThreadId(issueId: number, threadId: string): Promise<void> {
     const normalizedThreadId = threadId.trim()
     if (normalizedThreadId.length === 0) {
@@ -307,10 +339,10 @@ export class HarnessWorkerCodexRunnerService {
     return `'${value.replace(/'/g, `'\"'\"'`)}'`
   }
 
-  private sanitizeExecutionError(error: unknown): string {
+  private sanitizeExecutionError(error: unknown, config: ResolvedCodexAuthConfig): string {
     const preferredMessage =
       this.extractProcessOutput(error) || (error instanceof Error ? error.message : String(error))
-    const sensitiveValues = this.getSensitiveValues()
+    const sensitiveValues = this.getSensitiveValues(config)
     const redactedMessage = sensitiveValues.reduce((message, sensitiveValue) => {
       if (!sensitiveValue) {
         return message
@@ -332,8 +364,12 @@ export class HarnessWorkerCodexRunnerService {
     return this.truncateFromEnd(sanitizedMessage, 1_000)
   }
 
-  private sanitizeCodexFailure(execution: HarnessWorkerCodexExecutionEnvelope, fallbackMessage?: string): string {
-    const sensitiveValues = this.getSensitiveValues()
+  private sanitizeCodexFailure(
+    execution: HarnessWorkerCodexExecutionEnvelope,
+    config: ResolvedCodexAuthConfig,
+    fallbackMessage?: string,
+  ): string {
+    const sensitiveValues = this.getSensitiveValues(config)
     const redactedCodexStderr = sensitiveValues.reduce((message, sensitiveValue) => {
       if (!sensitiveValue) {
         return message
@@ -362,11 +398,8 @@ export class HarnessWorkerCodexRunnerService {
     return this.truncateFromEnd(message, 1_000)
   }
 
-  private getSensitiveValues(): string[] {
-    return [this.configService.get<string>('CODEX_AUTH_JSON')?.trim()].filter(
-      (value, index, values): value is string =>
-        typeof value === 'string' && value.length > 0 && values.indexOf(value) === index,
-    )
+  private getSensitiveValues(config: ResolvedCodexAuthConfig): string[] {
+    return getCodexAuthSensitiveValues(config)
   }
 
   private extractProcessOutput(error: unknown): string {

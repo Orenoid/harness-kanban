@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { CodingAgentService } from '@/coding-agent/coding-agent.service'
 import { PrismaService } from '@/database/prisma.service'
 import { GithubService } from '@/github/github.service'
 import { ConfigService } from '@nestjs/config'
@@ -10,6 +11,7 @@ import { HarnessWorkerToolchainService } from '../harness-worker-toolchain.servi
 describe('HarnessWorkerDevpodService', () => {
   let service: HarnessWorkerDevpodService
   let configService: jest.Mocked<ConfigService>
+  let codingAgentService: jest.Mocked<CodingAgentService>
   let githubService: jest.Mocked<GithubService>
   let toolchainService: jest.Mocked<HarnessWorkerToolchainService>
   let findProjectBindingMock: jest.Mock
@@ -20,6 +22,9 @@ describe('HarnessWorkerDevpodService', () => {
     configService = {
       get: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>
+    codingAgentService = {
+      getIssueCodingAgentSnapshot: jest.fn(),
+    } as unknown as jest.Mocked<CodingAgentService>
     githubService = {
       getTokenForWorkspace: jest.fn(),
     } as unknown as jest.Mocked<GithubService>
@@ -45,7 +50,13 @@ describe('HarnessWorkerDevpodService', () => {
       },
     } as unknown as jest.Mocked<PrismaService>
 
-    service = new HarnessWorkerDevpodService(prismaService, configService, toolchainService, githubService)
+    service = new HarnessWorkerDevpodService(
+      prismaService,
+      configService,
+      codingAgentService,
+      toolchainService,
+      githubService,
+    )
   })
 
   it('returns null when the issue is not bound to a project', async () => {
@@ -68,7 +79,7 @@ describe('HarnessWorkerDevpodService', () => {
     await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBeNull()
   })
 
-  it('returns null when CODEX_AUTH_JSON is missing', async () => {
+  it('returns null when no Codex coding agent is configured', async () => {
     findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
     findProjectMock.mockResolvedValue({
       env_config: null,
@@ -77,6 +88,7 @@ describe('HarnessWorkerDevpodService', () => {
       repo_base_branch: 'main',
     })
     githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
+    codingAgentService.getIssueCodingAgentSnapshot.mockResolvedValue(null)
 
     await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBeNull()
   })
@@ -113,7 +125,7 @@ describe('HarnessWorkerDevpodService', () => {
   })
 
   it('runs devpod up with a temporary git config for private repository access', async () => {
-    const codexAuthJson = '{"provider":"openai","accessToken":"codex-token"}'
+    const codexAuthJson = '{"accessToken":"codex-token","provider":"openai"}'
     const codexAuthJsonBase64 = Buffer.from(codexAuthJson, 'utf8').toString('base64')
 
     findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
@@ -139,14 +151,24 @@ describe('HarnessWorkerDevpodService', () => {
       },
       repo_base_branch: 'feature/planning',
     })
-    configService.get.mockImplementation((key: string) => {
-      if (key === 'CODEX_AUTH_JSON') {
-        return codexAuthJson
-      }
-
-      return undefined
-    })
     githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
+    codingAgentService.getIssueCodingAgentSnapshot.mockResolvedValue({
+      id: 'agent-1',
+      name: 'Primary Codex',
+      type: 'codex',
+      settings: {
+        authMode: 'auth-json',
+        authJson: {
+          accessToken: 'codex-token',
+          provider: 'openai',
+        },
+        model: 'gpt-5.3-codex',
+        reasoningEffort: 'low',
+      },
+      isDefault: true,
+      createdAt: '2026-04-03T00:00:00.000Z',
+      updatedAt: '2026-04-03T00:00:00.000Z',
+    })
     toolchainService.resolveCodexToolchainArtifact.mockResolvedValue({
       archivePath: '/opt/harness-kanban/toolchains/codex/0.116.0/codex-toolchain-linux-x64.tar.gz',
       kind: 'codex',
@@ -474,6 +496,120 @@ describe('HarnessWorkerDevpodService', () => {
       path: '/tmp/harness-kanban-devpod-docker-config',
       temporary: false,
     })
+  })
+
+  it('skips auth.json seeding when the Codex coding agent uses API key auth', async () => {
+    findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
+    findProjectMock.mockResolvedValue({
+      env_config: null,
+      github_repo_url: 'https://github.com/harness-kanban/payments-api',
+      mcp_config: null,
+      repo_base_branch: 'main',
+    })
+    githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
+    codingAgentService.getIssueCodingAgentSnapshot.mockResolvedValue({
+      id: 'agent-1',
+      name: 'Primary Codex',
+      type: 'codex',
+      settings: {
+        authMode: 'api-key',
+        apiKey: 'sk-test-123',
+        model: 'gpt-5.3-codex',
+        reasoningEffort: 'medium',
+      },
+      isDefault: true,
+      createdAt: '2026-04-03T00:00:00.000Z',
+      updatedAt: '2026-04-03T00:00:00.000Z',
+    })
+    toolchainService.resolveCodexToolchainArtifact.mockResolvedValue({
+      archivePath: '/opt/harness-kanban/toolchains/codex/0.116.0/codex-toolchain-linux-x64.tar.gz',
+      kind: 'codex',
+      version: '0.116.0',
+    })
+
+    const executeCommandSpy = jest
+      .spyOn(
+        service as unknown as { executeCommand: (file: string, args: string[], options: unknown) => Promise<any> },
+        'executeCommand',
+      )
+      .mockImplementation(async (_file: string, args: string[]) => {
+        if (args[0] === 'ssh' && args[1] === 'harness-kanban-issue-101' && args[3]?.includes('uname -s && uname -m')) {
+          return {
+            stdout: 'Linux\nx86_64\n',
+            stderr: '',
+          }
+        }
+
+        return { stdout: '', stderr: '' }
+      })
+    jest
+      .spyOn(
+        service as unknown as {
+          executeCommandWithInput: (
+            file: string,
+            args: string[],
+            inputFilePath: string,
+            options: unknown,
+          ) => Promise<any>
+        },
+        'executeCommandWithInput',
+      )
+      .mockResolvedValue({ stdout: '', stderr: '' })
+    jest
+      .spyOn(
+        service as unknown as {
+          prepareDockerConfigDirectory: () => Promise<{ path: string; temporary: boolean }>
+        },
+        'prepareDockerConfigDirectory',
+      )
+      .mockResolvedValue({ path: '/tmp/harness-kanban-devpod-docker-config', temporary: false })
+    jest
+      .spyOn(
+        service as unknown as {
+          cleanupDockerConfigDirectory: (directory: { path: string; temporary: boolean }) => Promise<void>
+        },
+        'cleanupDockerConfigDirectory',
+      )
+      .mockResolvedValue()
+    jest
+      .spyOn(
+        service as unknown as {
+          prepareGitConfigFile: (
+            githubRepoUrl: string,
+            token: string,
+          ) => Promise<{ path: string; directory: string; temporary: boolean }>
+        },
+        'prepareGitConfigFile',
+      )
+      .mockResolvedValue({
+        path: '/tmp/harness-kanban-devpod-git-config/gitconfig',
+        directory: '/tmp/harness-kanban-devpod-git-config',
+        temporary: false,
+      })
+    jest
+      .spyOn(
+        service as unknown as {
+          cleanupGitConfigFile: (file: { path: string; directory: string; temporary: boolean }) => Promise<void>
+        },
+        'cleanupGitConfigFile',
+      )
+      .mockResolvedValue()
+    jest
+      .spyOn(service as unknown as { readWorkspaceRecord: (...args: any[]) => Promise<any> }, 'readWorkspaceRecord')
+      .mockResolvedValue(null)
+    jest
+      .spyOn(service as unknown as { readWorkspaceStatus: (...args: any[]) => Promise<any> }, 'readWorkspaceStatus')
+      .mockResolvedValue(null)
+    jest
+      .spyOn(service as unknown as { readWorkspaceResult: (...args: any[]) => Promise<any> }, 'readWorkspaceResult')
+      .mockResolvedValue(null)
+
+    await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBe('harness-kanban-issue-101')
+
+    const sshCommands = executeCommandSpy.mock.calls
+      .filter(call => call[1][0] === 'ssh')
+      .map(call => String(call[1][3] ?? ''))
+    expect(sshCommands.some(command => command.includes('~/.codex/auth.json'))).toBe(false)
   })
 
   it('deletes a workspace with the devpod cli using the prepared environment', async () => {

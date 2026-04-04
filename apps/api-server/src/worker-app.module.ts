@@ -1,4 +1,5 @@
 import { AuthModule } from '@/auth/auth.module'
+import { CodingAgentModule } from '@/coding-agent/coding-agent.module'
 import { DatabaseModule } from '@/database/database.module'
 import { GithubModule } from '@/github/github.module'
 import { HarnessKanbanModule } from '@/harness-kanban/harness-kanban.module'
@@ -25,6 +26,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter'
     }),
     EventEmitterModule.forRoot(),
     DatabaseModule,
+    CodingAgentModule,
     GithubModule,
     HarnessKanbanModule,
     PgmqModule,

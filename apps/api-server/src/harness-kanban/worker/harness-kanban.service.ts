@@ -1,3 +1,4 @@
+import { CodingAgentService } from '@/coding-agent/coding-agent.service'
 import { IssueService } from '@/issue/issue.service'
 import { PgmqService } from '@/pgmq/pgmq.service'
 import { SystemBotId } from '@/user/constants/user.constants'
@@ -28,6 +29,7 @@ export class HarnessKanbanService implements OnApplicationBootstrap, OnApplicati
 
   constructor(
     private readonly registryService: HarnessWorkerRegistryService,
+    private readonly codingAgentService: CodingAgentService,
     private readonly issueService: IssueService,
     private readonly pgmqService: PgmqService,
     private readonly devpodService: HarnessWorkerDevpodService,
@@ -149,6 +151,8 @@ export class HarnessKanbanService implements OnApplicationBootstrap, OnApplicati
 
         this.logger.log(`Claimed queued issue ${claim.issueId} and moved it to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}`)
         try {
+          await this.codingAgentService.ensureIssueCodingAgentSnapshot(claim.issueId, 'codex')
+
           this.logger.log(`Planning pipeline for issue ${claim.issueId}: creating DevPod workspace`)
           const workspaceName = await this.devpodService.createWorkspaceForIssue(claim.issueId, claim.workspaceId)
           if (!workspaceName) {
@@ -279,6 +283,7 @@ export class HarnessKanbanService implements OnApplicationBootstrap, OnApplicati
   private async cleanupClaimedIssueWorkspace(issueId: number): Promise<void> {
     const workspaceName = this.devpodService.getWorkspaceNameForIssue(issueId)
     await this.devpodService.deleteWorkspace(workspaceName)
+    await this.codingAgentService.clearIssueCodingAgentSnapshot(issueId)
     this.logger.log(`Deleted DevPod workspace ${workspaceName} for issue ${issueId} after release trigger`)
   }
 }

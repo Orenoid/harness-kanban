@@ -71,6 +71,26 @@ describe('Issue + Property (e2e)', () => {
     throw new Error(`Issue ${issueId} did not record a Code Bot status activity for ${nextStatusId}`)
   }
 
+  const createCodexCodingAgent = async () => {
+    const suffix = Date.now()
+
+    await agent
+      .post('/api/v1/coding-agents')
+      .send({
+        codingAgent: {
+          name: `Issue Property Codex ${suffix}`,
+          type: 'codex',
+          settings: {
+            apiKey: `sk-issue-property-${suffix}`,
+            model: 'gpt-5.3-codex',
+            reasoningEffort: 'medium',
+          },
+          isDefault: true,
+        },
+      })
+      .expect(201)
+  }
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -300,6 +320,7 @@ describe('Issue + Property (e2e)', () => {
   // TODO this should be moved to the tests of harness-kanban module
   it('should auto-queue Code Bot issues while preserving human restrictions', async () => {
     const createdIssueIds: number[] = []
+    await createCodexCodingAgent()
 
     const createWithBotResponse = await agent
       .post('/api/v1/issues')
@@ -445,7 +466,7 @@ describe('Issue + Property (e2e)', () => {
       })
       .expect(200)
 
-    const invalidAssigneeResponse = await agent
+    await agent
       .put(`/api/v1/issues/${nonTodoIssueId}`)
       .send({
         operations: [
@@ -456,9 +477,12 @@ describe('Issue + Property (e2e)', () => {
           },
         ],
       })
-      .expect(403)
+      .expect(200)
 
-    expect(invalidAssigneeResponse.body.error.message).toBe('Code Bot can only be assigned to issues in Todo status')
+    const continuedIssue = await agent.get(`/api/v1/issues/${nonTodoIssueId}`).expect(200)
+    const continuedIssueRecord = continuedIssue.body.data.issue as IssueRecord
+    expect(getPropertyValue(continuedIssueRecord, SystemPropertyId.ASSIGNEE)).toBe(SystemBotId.CODE_BOT)
+    expect(getPropertyValue(continuedIssueRecord, SystemPropertyId.STATUS)).toBe('in_progress')
 
     await Promise.all(createdIssueIds.map(issueId => agent.delete(`/api/v1/issues/${issueId}`).expect(200)))
   })

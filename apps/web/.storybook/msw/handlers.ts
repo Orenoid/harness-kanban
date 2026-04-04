@@ -5,6 +5,7 @@ import {
   createAgentSaveMessagesHandler,
 } from './apis/agent'
 import { createSessionHandler, createSignOutHandler } from './apis/auth'
+import { createCodingAgentHandlers } from './apis/coding-agents'
 import {
   createDeleteGithubConnectionHandler,
   createGithubBranchesHandler,
@@ -27,6 +28,7 @@ type MswHandler =
   | ReturnType<typeof createAgentChatHistoryHandler>
   | ReturnType<typeof createAgentChatsHandler>
   | ReturnType<typeof createAgentSaveMessagesHandler>
+  | ReturnType<typeof createCodingAgentHandlers>[number]
   | ReturnType<typeof createSessionHandler>
   | ReturnType<typeof createSignOutHandler>
   | ReturnType<typeof createIssuesHandler>
@@ -41,10 +43,11 @@ type MswHandler =
   | ReturnType<typeof createProjectsHandler>
   | ReturnType<typeof createUsersHandler>
 
-type MswHandlerGroupKey = 'auth' | 'properties' | 'issues' | 'projects' | 'users' | 'agent' | 'github'
+type MswHandlerGroupKey = 'auth' | 'properties' | 'issues' | 'projects' | 'users' | 'agent' | 'github' | 'codingAgents'
 
 export const defaultMswHandlerGroups: Record<MswHandlerGroupKey, MswHandler[]> = {
   auth: [createSessionHandler(), createSignOutHandler()],
+  codingAgents: createCodingAgentHandlers(),
   github: [
     createGithubConnectionHandler(),
     createUpdateGithubConnectionHandler(),
