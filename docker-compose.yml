@@ -40,8 +40,17 @@ services:
     container_name: harness-kanban-api
     image: ghcr.io/orenoid/harness-kanban-api:latest
     pull_policy: always
-    env_file:
-      - apps/api-server/.env
+    environment:
+      PORT: 3001
+      APP_ENV: prod
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgrestemppassword@postgres:5432/harness_kanban
+      BETTER_AUTH_SECRET: change-me-before-public-deploy
+      BETTER_AUTH_URL: http://localhost:3001
+      APP_BASE_URL: http://localhost:3000
+      AI_PROVIDER: openai
+      OPENAI_API_KEY: ''
+      OPENAI_MODEL: gpt-4o-mini
     restart: unless-stopped
     depends_on:
       postgres:
@@ -58,8 +67,19 @@ services:
     container_name: harness-kanban-web
     image: ghcr.io/orenoid/harness-kanban-web:latest
     pull_policy: always
-    env_file:
-      - apps/web/.env
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      RUNTIME_API_BASE_URL: http://localhost:3001
+      RUNTIME_SOCKET_SERVER_URL: http://localhost:3001
+      STORYBOOK_PORT: 6006
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: false
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_BUCKET: harness-kanban-uploads
+      MINIO_PUBLIC_BASE_URL: http://localhost:9000
     restart: unless-stopped
     depends_on:
       api:
@@ -84,8 +104,22 @@ services:
     container_name: harness-kanban-worker
     image: ghcr.io/orenoid/harness-kanban-worker:latest
     pull_policy: always
-    env_file:
-      - apps/api-server/.env.worker
+    environment:
+      DATABASE_URL: postgresql://postgres:postgrestemppassword@postgres:5432/harness_kanban
+      NODE_ENV: production
+      HARNESS_WORKER_TOOLCHAIN_STORE_DIR: /opt/harness-kanban/toolchains
+      HARNESS_WORKER_CODEX_TOOLCHAIN_VERSION: 0.116.0
+      HARNESS_WORKER_CLAUDE_CODE_TOOLCHAIN_VERSION: 2.1.92
+      HARNESS_WORKER_GIT_COMMIT_NAME: CodeBot
+      HARNESS_WORKER_GIT_COMMIT_EMAIL: bot_code_bot@harness-kanban.local
+      HARNESS_WORKER_CODING_AGENT_TIMEOUT_MS: 1800000
+      HARNESS_WORKER_CODING_AGENT_OUTPUT_REPAIR_ATTEMPTS: 2
+      HARNESS_WORKER_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS: 2
+      HARNESS_WORKER_HEARTBEAT_INTERVAL_MS: 10000
+      HARNESS_WORKER_POLL_INTERVAL_MS: 5000
+      HARNESS_WORKER_STALE_TIMEOUT_MS: 60000
+      HARNESS_WORKER_GITHUB_READINESS_POLL_INTERVAL_MS: 15000
+      HARNESS_WORKER_GITHUB_READINESS_TIMEOUT_MS: 1800000
     restart: unless-stopped
     depends_on:
       api:
