@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/shadcn/utils'
-import { CodexCodingAgentForm } from '@/settings/components/coding-agent-form'
+import { ClaudeCodeCodingAgentForm, CodexCodingAgentForm } from '@/settings/components/coding-agent-form'
 import {
   CODING_AGENT_DEFINITIONS,
   CodingAgentManagementDetail,
@@ -30,6 +30,7 @@ import {
   ConfigurableCodingAgentType,
   CreateCodingAgentManagementInput,
   getCodingAgentDefinition,
+  isConfigurableCodingAgentType,
   UpdateCodingAgentManagementInput,
 } from '@repo/shared'
 
@@ -50,15 +51,15 @@ type CodingAgentSettingsSectionViewProps = {
   onCloseEdit: () => void
   onConfirmDelete: () => void
   onCreate: (type: ConfigurableCodingAgentType) => void
-  onCreateSubmit: (codingAgent: CreateCodingAgentManagementInput<'codex'>) => Promise<void> | void
+  onCreateSubmit: (codingAgent: CreateCodingAgentManagementInput) => Promise<void> | void
   onDelete: (codingAgent: CodingAgentManagementDetail) => void
   onEdit: (codingAgent: SupportedCodingAgentDetail) => void
   onRetry: () => void
-  onUpdateSubmit: (codingAgent: UpdateCodingAgentManagementInput<'codex'>) => Promise<void> | void
+  onUpdateSubmit: (codingAgent: UpdateCodingAgentManagementInput) => Promise<void> | void
 }
 
 const isSupportedCodingAgent = (codingAgent: CodingAgentManagementDetail): codingAgent is SupportedCodingAgentDetail =>
-  codingAgent.type === 'codex'
+  isConfigurableCodingAgentType(codingAgent.type)
 
 const formatCredentialStatus = (settings: CodingAgentManagementSettings): string =>
   settings.hasCredential ? 'Configured' : 'Missing'
@@ -86,14 +87,20 @@ const renderCodingAgentDetails = (codingAgent: CodingAgentManagementDetail) => {
     ]
   }
 
+  const settings = codingAgent.settings as CodingAgentManagementSettings<'claude-code'>
+
   return [
     {
       label: 'Model',
-      value: codingAgent.settings.model,
+      value: settings.model,
+    },
+    {
+      label: 'Base URL',
+      value: settings.baseUrl,
     },
     {
       label: 'Credentials',
-      value: formatCredentialStatus(codingAgent.settings),
+      value: formatCredentialStatus(settings),
     },
   ]
 }
@@ -157,7 +164,7 @@ export const CodingAgentSettingsSectionView: React.FC<CodingAgentSettingsSection
                   variant={isAvailable ? 'default' : 'outline'}
                   disabled={!isAvailable}
                   onClick={() => {
-                    if (isAvailable) {
+                    if (isAvailable && isConfigurableCodingAgentType(definition.type)) {
                       onCreate(definition.type)
                     }
                   }}>
@@ -174,7 +181,7 @@ export const CodingAgentSettingsSectionView: React.FC<CodingAgentSettingsSection
           <div>
             <h3 className="text-base font-semibold">Saved configurations</h3>
             <p className="text-muted-foreground text-sm">
-              Edit non-sensitive fields, rotate API keys, and mark one configuration as the default for each agent type.
+              Edit non-sensitive fields, rotate API keys, and mark one configuration as the workspace default.
             </p>
           </div>
         </div>
@@ -197,7 +204,7 @@ export const CodingAgentSettingsSectionView: React.FC<CodingAgentSettingsSection
         ) : codingAgents.length === 0 ? (
           <Card>
             <CardContent className="text-muted-foreground py-8 text-sm">
-              No coding agent configurations yet. Add a Codex configuration above to get started.
+              No coding agent configurations yet. Add a coding agent configuration above to get started.
             </CardContent>
           </Card>
         ) : (
@@ -222,7 +229,7 @@ export const CodingAgentSettingsSectionView: React.FC<CodingAgentSettingsSection
                       <CardDescription>
                         {isEditable
                           ? 'Ready for use in worker execution.'
-                          : 'This agent type is stored and can still be removed, but Settings editing is not available yet.'}
+                          : 'This configuration is stored but cannot be edited in Settings yet.'}
                       </CardDescription>
                     </div>
                     <CardAction>
@@ -277,6 +284,14 @@ export const CodingAgentSettingsSectionView: React.FC<CodingAgentSettingsSection
                 onSubmit={onCreateSubmit}
               />
             ) : null}
+            {createType === 'claude-code' ? (
+              <ClaudeCodeCodingAgentForm
+                mode="create"
+                isSubmitting={isCreating}
+                onCancel={onCloseCreate}
+                onSubmit={onCreateSubmit}
+              />
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>
@@ -286,15 +301,24 @@ export const CodingAgentSettingsSectionView: React.FC<CodingAgentSettingsSection
           <DialogHeader>
             <DialogTitle>{editTarget ? `Edit ${editTarget.name}` : 'Edit configuration'}</DialogTitle>
             <DialogDescription>
-              Update the Codex model, reasoning effort, default status, or rotate the stored API key.
+              Update the coding agent settings, workspace default status, or rotate the stored API key.
             </DialogDescription>
           </DialogHeader>
 
           <div className="min-h-0 overflow-y-auto pr-1">
-            {editTarget ? (
+            {editTarget?.type === 'codex' ? (
               <CodexCodingAgentForm
                 mode="update"
-                initialAgent={editTarget}
+                initialAgent={editTarget as CodingAgentManagementDetail<'codex'>}
+                isSubmitting={isUpdating}
+                onCancel={onCloseEdit}
+                onSubmit={onUpdateSubmit}
+              />
+            ) : null}
+            {editTarget?.type === 'claude-code' ? (
+              <ClaudeCodeCodingAgentForm
+                mode="update"
+                initialAgent={editTarget as CodingAgentManagementDetail<'claude-code'>}
                 isSubmitting={isUpdating}
                 onCancel={onCloseEdit}
                 onSubmit={onUpdateSubmit}
@@ -347,7 +371,7 @@ export const CodingAgentSettingsSection: React.FC = () => {
     [codingAgents, deleteTargetId],
   )
 
-  const handleCreateSubmit = async (codingAgent: CreateCodingAgentManagementInput<'codex'>) => {
+  const handleCreateSubmit = async (codingAgent: CreateCodingAgentManagementInput) => {
     try {
       const createdAgent = await createMutation.mutateAsync(codingAgent)
       setCreateType(null)
@@ -357,7 +381,7 @@ export const CodingAgentSettingsSection: React.FC = () => {
     }
   }
 
-  const handleUpdateSubmit = async (codingAgent: UpdateCodingAgentManagementInput<'codex'>) => {
+  const handleUpdateSubmit = async (codingAgent: UpdateCodingAgentManagementInput) => {
     if (!editTarget) {
       return
     }

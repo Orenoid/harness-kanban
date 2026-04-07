@@ -1,12 +1,12 @@
 import { DatabaseModule } from '@/database/database.module'
 import { PrismaService } from '@/database/prisma.service'
-import { HarnessWorkerRegistryService } from '@/harness-kanban/worker/harness-worker-registry.service'
 import {
   HARNESS_WORKER_BUSY_STATUS,
   HARNESS_WORKER_IDLE_STATUS,
   HARNESS_WORKER_PLANNING_ISSUE_STATUS,
   HARNESS_WORKER_QUEUED_ISSUE_STATUS,
-} from '@/harness-kanban/worker/harness-worker.constants'
+} from '@/harness-kanban/worker/worker.constants'
+import { WorkerService } from '@/harness-kanban/worker/worker.service'
 import { SystemBotId } from '@/user/constants/user.constants'
 import { WorkerAppModule } from '@/worker-app.module'
 import { INestApplicationContext } from '@nestjs/common'
@@ -32,6 +32,8 @@ const waitFor = async (assertion: () => Promise<boolean>, timeoutMs = 5_000, int
 }
 
 describe('Harness worker (e2e)', () => {
+  jest.setTimeout(20_000)
+
   let moduleRef: TestingModule
   let prismaService: PrismaService
   const workerContexts: INestApplicationContext[] = []
@@ -69,8 +71,8 @@ describe('Harness worker (e2e)', () => {
   })
 
   it('registers a worker row and keeps its heartbeat fresh', async () => {
-    const registryService = await createWorkerHarness()
-    const workerId = registryService.currentWorkerId
+    const workerService = await createWorkerHarness()
+    const workerId = workerService.currentWorkerId
 
     expect(workerId).toBeTruthy()
 
@@ -93,8 +95,8 @@ describe('Harness worker (e2e)', () => {
 
   it('deletes the worker row when the worker shuts down', async () => {
     const workerContext = await NestFactory.createApplicationContext(WorkerAppModule)
-    const registryService = workerContext.get(HarnessWorkerRegistryService)
-    const workerId = registryService.currentWorkerId
+    const workerService = workerContext.get(WorkerService)
+    const workerId = workerService.currentWorkerId
 
     expect(workerId).toBeTruthy()
 
@@ -110,8 +112,8 @@ describe('Harness worker (e2e)', () => {
   it('ignores queued issues that are not assigned to Code Bot', async () => {
     const issueId = await createQueuedIssue('urgent', 'user-2')
 
-    const registryService = await createWorkerHarness()
-    const workerId = registryService.currentWorkerId!
+    const workerService = await createWorkerHarness()
+    const workerId = workerService.currentWorkerId!
 
     await sleep(250)
 
@@ -127,8 +129,8 @@ describe('Harness worker (e2e)', () => {
   it('ignores queued Code Bot issues that are not in a project', async () => {
     const issueId = await createQueuedIssue('urgent', SystemBotId.CODE_BOT, null)
 
-    const registryService = await createWorkerHarness()
-    const workerId = registryService.currentWorkerId!
+    const workerService = await createWorkerHarness()
+    const workerId = workerService.currentWorkerId!
 
     await sleep(250)
 
@@ -146,15 +148,19 @@ describe('Harness worker (e2e)', () => {
     const lowIssueId = await createQueuedIssue('low')
     const urgentIssueId = await createQueuedIssue('urgent')
 
-    const registryService = await createWorkerHarness()
-    const workerId = registryService.currentWorkerId!
+    const workerService = await createWorkerHarness()
+    const workerId = workerService.currentWorkerId!
 
     await waitFor(async () => {
       const worker = await prismaService.client.harness_worker.findUniqueOrThrow({
         where: { id: workerId },
       })
 
-      return worker.issue_id === urgentIssueId && worker.status === HARNESS_WORKER_BUSY_STATUS
+      return (
+        worker.issue_id === urgentIssueId &&
+        worker.status === HARNESS_WORKER_BUSY_STATUS &&
+        (await getIssueStatus(urgentIssueId)) === HARNESS_WORKER_PLANNING_ISSUE_STATUS
+      )
     })
 
     const worker = await prismaService.client.harness_worker.findUniqueOrThrow({
@@ -163,7 +169,7 @@ describe('Harness worker (e2e)', () => {
 
     expect(worker.issue_id).toBe(urgentIssueId)
     expect(worker.status).toBe(HARNESS_WORKER_BUSY_STATUS)
-    expect(registryService.currentIssueId).toBe(urgentIssueId)
+    expect(workerService.currentIssueId).toBe(urgentIssueId)
     expect(worker.issue_id).not.toBe(lowIssueId)
     expect(worker.issue_id).not.toBe(ignoredUrgentIssueId)
     expect(await getIssueStatus(urgentIssueId)).toBe(HARNESS_WORKER_PLANNING_ISSUE_STATUS)
@@ -176,11 +182,20 @@ describe('Harness worker (e2e)', () => {
     const workerIds = [workerOne.currentWorkerId!, workerTwo.currentWorkerId!]
 
     await waitFor(async () => {
-      const claimedWorkers = await prismaService.client.harness_worker.findMany({
-        where: { issue_id: issueId },
+      const workers = await prismaService.client.harness_worker.findMany({
+        where: {
+          id: { in: workerIds },
+        },
       })
 
-      return claimedWorkers.length === 1
+      return (
+        workers.length === 2 &&
+        workers.filter(worker => worker.issue_id === issueId).length === 1 &&
+        workers.filter(worker => worker.issue_id === null).length === 1 &&
+        workers.some(worker => worker.status === HARNESS_WORKER_BUSY_STATUS) &&
+        workers.some(worker => worker.status === HARNESS_WORKER_IDLE_STATUS) &&
+        (await getIssueStatus(issueId)) === HARNESS_WORKER_PLANNING_ISSUE_STATUS
+      )
     })
 
     const workers = await prismaService.client.harness_worker.findMany({
@@ -198,11 +213,11 @@ describe('Harness worker (e2e)', () => {
     expect(await getIssueStatus(issueId)).toBe(HARNESS_WORKER_PLANNING_ISSUE_STATUS)
   })
 
-  const createWorkerHarness = async (): Promise<HarnessWorkerRegistryService> => {
+  const createWorkerHarness = async (): Promise<WorkerService> => {
     const workerContext = await NestFactory.createApplicationContext(WorkerAppModule)
     workerContexts.push(workerContext)
 
-    return workerContext.get(HarnessWorkerRegistryService)
+    return workerContext.get(WorkerService)
   }
 
   const createQueuedIssue = async (

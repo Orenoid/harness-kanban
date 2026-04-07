@@ -418,8 +418,8 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           spellCheck={false}
         />
         <p className="text-muted-foreground text-sm">
-          Store project-level MCP servers for Codex. This config is loaded only when a new workspace is created, and
-          existing workspaces stay unchanged.
+          Store project-level MCP servers for coding agent workspaces. This config is loaded only when a new workspace
+          is created, and existing workspaces stay unchanged.
         </p>
         {errors.mcpConfigText?.message ? <p className="text-sm text-red-500">{errors.mcpConfigText.message}</p> : null}
       </div>

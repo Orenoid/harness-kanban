@@ -124,7 +124,7 @@ export const CreateMode: Story = {
 
     if (
       !canvasElement.textContent?.includes(
-        'Store project-level MCP servers for Codex. This config is loaded only when a new workspace is created, and existing workspaces stay unchanged.',
+        'Store project-level MCP servers for coding agent workspaces. This config is loaded only when a new workspace is created, and existing workspaces stay unchanged.',
       )
     ) {
       throw new Error('Expected MCP config helper text to render.')

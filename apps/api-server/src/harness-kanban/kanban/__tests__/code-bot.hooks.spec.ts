@@ -43,7 +43,7 @@ describe('Code Bot hooks', () => {
       }),
     ).resolves.toEqual({ valid: true })
 
-    expect(hasCodingAgentConfiguredMock).toHaveBeenCalledWith('codex')
+    expect(hasCodingAgentConfiguredMock).toHaveBeenCalledWith('workspace-1')
   })
 
   it('rejects create when Code Bot is assigned with a non-Todo status', async () => {
@@ -104,7 +104,7 @@ describe('Code Bot hooks', () => {
       }),
     ).resolves.toEqual({ valid: true })
 
-    expect(hasCodingAgentConfiguredMock).toHaveBeenCalledWith('codex')
+    expect(hasCodingAgentConfiguredMock).toHaveBeenCalledWith('workspace-1')
   })
 
   it('rejects assigning Code Bot when the current issue status is Queued', async () => {

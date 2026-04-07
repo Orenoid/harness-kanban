@@ -1,15 +1,16 @@
 import { AuthModule } from '@/auth/auth.module'
-import { CodingAgentModule } from '@/coding-agent/coding-agent.module'
 import { DatabaseModule } from '@/database/database.module'
 import { GithubModule } from '@/github/github.module'
+import { CodingAgentModule } from '@/harness-kanban/coding-agent/coding-agent.module'
 import { HarnessKanbanModule } from '@/harness-kanban/harness-kanban.module'
-import { HarnessKanbanService } from '@/harness-kanban/worker/harness-kanban.service'
-import { HarnessWorkerCodexRunnerService } from '@/harness-kanban/worker/harness-worker-codex-runner.service'
-import { HarnessWorkerCodexWorkflowService } from '@/harness-kanban/worker/harness-worker-codex-workflow.service'
-import { HarnessWorkerDevpodService } from '@/harness-kanban/worker/harness-worker-devpod.service'
-import { HarnessWorkerGithubService } from '@/harness-kanban/worker/harness-worker-github.service'
-import { HarnessWorkerRegistryService } from '@/harness-kanban/worker/harness-worker-registry.service'
-import { HarnessWorkerToolchainService } from '@/harness-kanban/worker/harness-worker-toolchain.service'
+import { HarnessWorkerCodingAgentWorkflowService } from '@/harness-kanban/worker/coding-agent-workflow.service'
+import { HarnessWorkerDevpodService } from '@/harness-kanban/worker/devpod.service'
+import { HarnessWorkerGithubService } from '@/harness-kanban/worker/github.service'
+import { HarnessWorkerCodingAgentProviderRegistry } from '@/harness-kanban/worker/providers/coding-agent-provider.registry'
+import { HarnessWorkerClaudeCodeProvider } from '@/harness-kanban/worker/providers/harness-worker-claude-code.provider'
+import { HarnessWorkerCodexProvider } from '@/harness-kanban/worker/providers/harness-worker-codex.provider'
+import { HarnessWorkerToolchainService } from '@/harness-kanban/worker/toolchain.service'
+import { WorkerService } from '@/harness-kanban/worker/worker.service'
 import { IssueModule } from '@/issue/issue.module'
 import { PgmqModule } from '@/pgmq/pgmq.module'
 import { ProjectModule } from '@/project/project.module'
@@ -37,13 +38,14 @@ import { EventEmitterModule } from '@nestjs/event-emitter'
     UserModule,
   ],
   providers: [
-    HarnessWorkerRegistryService,
     HarnessWorkerDevpodService,
     HarnessWorkerToolchainService,
-    HarnessWorkerCodexRunnerService,
-    HarnessWorkerCodexWorkflowService,
+    HarnessWorkerCodexProvider,
+    HarnessWorkerClaudeCodeProvider,
+    HarnessWorkerCodingAgentProviderRegistry,
+    HarnessWorkerCodingAgentWorkflowService,
     HarnessWorkerGithubService,
-    HarnessKanbanService,
+    WorkerService,
   ],
 })
 export class WorkerAppModule {}

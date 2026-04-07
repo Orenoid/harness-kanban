@@ -1,7 +1,7 @@
 import { PrismaService } from '@/database/prisma.service'
 import { GithubService } from '@/github/github.service'
 import { ConfigService } from '@nestjs/config'
-import { HarnessWorkerGithubService } from '../harness-worker-github.service'
+import { HarnessWorkerGithubService } from '../github.service'
 
 describe('HarnessWorkerGithubService', () => {
   let service: HarnessWorkerGithubService
@@ -385,6 +385,87 @@ describe('HarnessWorkerGithubService', () => {
     )
     expect(fetchMock.mock.calls[2]?.[0]).toBe(
       'https://api.github.com/repos/harness-kanban/payments-api/pulls/25/ready_for_review',
+    )
+  })
+
+  it('falls back to GraphQL when REST ready_for_review returns 404', async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            number: 25,
+            html_url: 'https://github.com/harness-kanban/payments-api/pull/25',
+            draft: true,
+            head: { ref: 'code-bot/issue-101' },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          number: 25,
+          html_url: 'https://github.com/harness-kanban/payments-api/pull/25',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        text: async () => '{"message":"Not Found"}',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          number: 25,
+          html_url: 'https://github.com/harness-kanban/payments-api/pull/25',
+          node_id: 'PR_kwDOTest123',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            markPullRequestReadyForReview: {
+              pullRequest: {
+                number: 25,
+                isDraft: false,
+                url: 'https://github.com/harness-kanban/payments-api/pull/25',
+              },
+            },
+          },
+        }),
+      })
+
+    await expect(
+      service.ensureReadyForReviewPullRequest({
+        issueId: 101,
+        workspaceId: 'workspace-1',
+        branchName: 'code-bot/issue-101',
+        pullRequestTitle: 'feat(worker): implement planning workflow',
+        pullRequestBody: '## Summary\n- implement the approved workflow',
+      }),
+    ).resolves.toEqual({
+      number: 25,
+      url: 'https://github.com/harness-kanban/payments-api/pull/25',
+    })
+
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      'https://api.github.com/repos/harness-kanban/payments-api/pulls/25/ready_for_review',
+    )
+    expect(fetchMock.mock.calls[3]?.[0]).toBe('https://api.github.com/repos/harness-kanban/payments-api/pulls/25')
+    expect(fetchMock.mock.calls[4]?.[0]).toBe('https://api.github.com/graphql')
+    expect(fetchMock.mock.calls[4]?.[1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          query:
+            'mutation($pullRequestId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) { pullRequest { number isDraft url } } }',
+          variables: {
+            pullRequestId: 'PR_kwDOTest123',
+          },
+        }),
+      }),
     )
   })
 

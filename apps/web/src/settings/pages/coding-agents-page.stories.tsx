@@ -104,7 +104,7 @@ export const ManagementFlow: Story = {
     await userEvent.type(createModelInput, 'gpt-5.4')
     await userEvent.type(createApiKeyInput, 'sk-storybook-create')
 
-    const createSubmitButton = findButtonByText(ownerDocument, 'Create configuration')
+    const createSubmitButton = findButtonByText(ownerDocument, 'Save configuration')
     if (!createSubmitButton) {
       throw new Error('Expected the create submit button to render.')
     }
@@ -114,7 +114,7 @@ export const ManagementFlow: Story = {
     await waitForCondition(() => !(ownerDocument.body.textContent?.includes('Add Codex configuration') ?? false))
 
     if (!canvasElement.textContent?.includes('Legacy Claude Runner')) {
-      throw new Error('Expected the coming-soon Claude Code card to remain visible after creating a Codex entry.')
+      throw new Error('Expected the saved Claude Code configuration to remain visible after creating a Codex entry.')
     }
   },
 }

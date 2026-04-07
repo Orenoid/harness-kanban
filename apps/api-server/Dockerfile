@@ -37,12 +37,14 @@ RUN pnpm --filter @harness-kanban/api-server build
 FROM api-build AS worker-build
 ARG TARGETARCH
 ARG HARNESS_WORKER_CODEX_TOOLCHAIN_VERSION=0.116.0
+ARG HARNESS_WORKER_CLAUDE_CODE_TOOLCHAIN_VERSION=2.1.92
 RUN case "$TARGETARCH" in \
     amd64) toolchain_target="linux-x64" ;; \
     arm64) toolchain_target="linux-arm64" ;; \
     *) echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
   esac \
-  && node /workspace/scripts/build-codex-toolchain.mjs --codex-version "$HARNESS_WORKER_CODEX_TOOLCHAIN_VERSION" --output-dir /opt/harness-kanban/toolchains --target "$toolchain_target"
+  && node /workspace/scripts/build-coding-agent-toolchain.mjs --agent codex --version "$HARNESS_WORKER_CODEX_TOOLCHAIN_VERSION" --output-dir /opt/harness-kanban/toolchains --target "$toolchain_target" \
+  && node /workspace/scripts/build-coding-agent-toolchain.mjs --agent claude-code --version "$HARNESS_WORKER_CLAUDE_CODE_TOOLCHAIN_VERSION" --output-dir /opt/harness-kanban/toolchains --target "$toolchain_target"
 
 FROM api-build AS api-deploy
 RUN pnpm deploy --filter @harness-kanban/api-server --legacy --prod /opt/harness-kanban/api-server

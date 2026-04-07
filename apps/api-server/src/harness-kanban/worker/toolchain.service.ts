@@ -4,8 +4,17 @@ import { join } from 'node:path'
 
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { CodingAgentType } from '@repo/shared'
 
-const DEFAULT_CODEX_TOOLCHAIN_VERSION = '0.116.0'
+const DEFAULT_TOOLCHAIN_VERSION_BY_KIND: Record<CodingAgentType, string> = {
+  codex: '0.116.0',
+  'claude-code': '2.1.92',
+}
+
+const TOOLCHAIN_VERSION_ENV_BY_KIND: Record<CodingAgentType, string> = {
+  codex: 'HARNESS_WORKER_CODEX_TOOLCHAIN_VERSION',
+  'claude-code': 'HARNESS_WORKER_CLAUDE_CODE_TOOLCHAIN_VERSION',
+}
 
 export type HarnessWorkerToolchainPlatform = {
   arch: 'arm64' | 'x64'
@@ -14,7 +23,7 @@ export type HarnessWorkerToolchainPlatform = {
 
 export type HarnessWorkerToolchainArtifact = {
   archivePath: string
-  kind: 'codex'
+  kind: CodingAgentType
   version: string
 }
 
@@ -25,27 +34,34 @@ export class HarnessWorkerToolchainService {
   async resolveCodexToolchainArtifact(
     platform: HarnessWorkerToolchainPlatform,
   ): Promise<HarnessWorkerToolchainArtifact> {
+    return this.resolveToolchainArtifact('codex', platform)
+  }
+
+  async resolveToolchainArtifact(
+    kind: CodingAgentType,
+    platform: HarnessWorkerToolchainPlatform,
+  ): Promise<HarnessWorkerToolchainArtifact> {
     const version =
-      this.configService.get<string>('HARNESS_WORKER_CODEX_TOOLCHAIN_VERSION')?.trim() ||
-      DEFAULT_CODEX_TOOLCHAIN_VERSION
+      this.configService.get<string>(TOOLCHAIN_VERSION_ENV_BY_KIND[kind])?.trim() ||
+      DEFAULT_TOOLCHAIN_VERSION_BY_KIND[kind]
     const archivePath = join(
       this.resolveToolchainStoreDir(),
-      'codex',
+      kind,
       version,
-      `codex-toolchain-${platform.os}-${platform.arch}.tar.gz`,
+      `${kind}-toolchain-${platform.os}-${platform.arch}.tar.gz`,
     )
 
     try {
       await access(archivePath, fsConstants.R_OK)
     } catch {
       throw new Error(
-        `Codex toolchain archive was not found at ${archivePath}. Set HARNESS_WORKER_TOOLCHAIN_STORE_DIR to a directory that contains prebuilt Codex toolchains.`,
+        `${kind} toolchain archive was not found at ${archivePath}. Set HARNESS_WORKER_TOOLCHAIN_STORE_DIR to a directory that contains prebuilt coding agent toolchains.`,
       )
     }
 
     return {
       archivePath,
-      kind: 'codex',
+      kind,
       version,
     }
   }

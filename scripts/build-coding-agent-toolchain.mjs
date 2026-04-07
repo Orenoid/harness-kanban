@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile as execFileCallback } from 'node:child_process'
-import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,35 +8,49 @@ import { promisify } from 'node:util'
 
 const execFile = promisify(execFileCallback)
 
-const DEFAULT_CODEX_VERSION = '0.116.0'
 const DEFAULT_NODE_VERSION = 'v24.14.0'
 const DEFAULT_TARGETS = ['linux-arm64', 'linux-x64']
+const TOOLCHAIN_DEFINITIONS = {
+  codex: {
+    defaultVersion: '0.116.0',
+    displayName: 'Codex',
+    packageName: '@openai/codex',
+  },
+  'claude-code': {
+    defaultVersion: '2.1.92',
+    displayName: 'Claude Code',
+    packageName: '@anthropic-ai/claude-code',
+  },
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '..')
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
+  const definition = TOOLCHAIN_DEFINITIONS[options.agent]
   const storeRoot = options.outputDir || resolveDefaultStoreRoot()
   const targets = options.targets.length > 0 ? options.targets : DEFAULT_TARGETS
 
   for (const target of targets) {
     const platform = parseTarget(target)
     await buildToolchainArtifact({
-      codexVersion: options.codexVersion,
+      definition,
       nodeVersion: options.nodeVersion,
       platform,
       storeRoot,
+      toolchainVersion: options.toolchainVersion,
     })
   }
 }
 
 function parseArgs(args) {
   const options = {
-    codexVersion: DEFAULT_CODEX_VERSION,
+    agent: 'codex',
     nodeVersion: DEFAULT_NODE_VERSION,
     outputDir: '',
     targets: [],
+    toolchainVersion: '',
   }
 
   for (let index = 0; index < args.length; index += 1) {
@@ -46,8 +60,17 @@ function parseArgs(args) {
       continue
     }
 
-    if (value === '--codex-version') {
-      options.codexVersion = requireNextArg(args, ++index, '--codex-version')
+    if (value === '--agent') {
+      const agent = requireNextArg(args, ++index, '--agent')
+      if (!(agent in TOOLCHAIN_DEFINITIONS)) {
+        throw new Error(`Unsupported agent: ${agent}`)
+      }
+      options.agent = agent
+      continue
+    }
+
+    if (value === '--version') {
+      options.toolchainVersion = requireNextArg(args, ++index, '--version')
       continue
     }
 
@@ -84,6 +107,10 @@ function parseArgs(args) {
     throw new Error(`Unknown argument: ${value}`)
   }
 
+  if (!options.toolchainVersion) {
+    options.toolchainVersion = TOOLCHAIN_DEFINITIONS[options.agent].defaultVersion
+  }
+
   return options
 }
 
@@ -97,13 +124,14 @@ function requireNextArg(args, index, flagName) {
 }
 
 function printHelp() {
-  console.log(`Build prepackaged Codex toolchains for the harness worker.
+  console.log(`Build prepackaged coding agent toolchains for the harness worker.
 
 Usage:
-  pnpm toolchain:build:codex [options]
+  pnpm toolchain:build:agent --agent <codex|claude-code> [options]
 
 Options:
-  --codex-version <version>  Codex npm package version. Default: ${DEFAULT_CODEX_VERSION}
+  --agent <agent>            Coding agent CLI to package. Default: codex
+  --version <version>        Coding agent npm package version. Defaults by agent
   --node-version <version>   Node.js version to bundle. Default: ${DEFAULT_NODE_VERSION}
   --output-dir <path>        Toolchain store root directory. Default: platform cache directory
   --target <target>          Target to build, repeatable. Example: linux-arm64
@@ -142,14 +170,14 @@ function parseTarget(target) {
   throw new Error(`Unsupported target: ${target}`)
 }
 
-async function buildToolchainArtifact({ codexVersion, nodeVersion, platform, storeRoot }) {
+async function buildToolchainArtifact({ definition, nodeVersion, platform, storeRoot, toolchainVersion }) {
   const targetLabel = `${platform.os}-${platform.arch}`
-  const workDir = await mkdtemp(join(tmpdir(), `harness-kanban-codex-toolchain-${targetLabel}-`))
-  const targetOutputDir = join(storeRoot, 'codex', codexVersion)
-  const archivePath = join(targetOutputDir, `codex-toolchain-${targetLabel}.tar.gz`)
+  const workDir = await mkdtemp(join(tmpdir(), `harness-kanban-${definition.packageName.replaceAll('/', '-')}-${targetLabel}-`))
+  const targetOutputDir = join(storeRoot, resolveToolchainKind(definition.packageName), toolchainVersion)
+  const archivePath = join(targetOutputDir, `${resolveToolchainKind(definition.packageName)}-toolchain-${targetLabel}.tar.gz`)
 
   try {
-    console.log(`Building Codex toolchain ${codexVersion} for ${targetLabel}`)
+    console.log(`Building ${definition.displayName} toolchain ${toolchainVersion} for ${targetLabel}`)
 
     const nodeArchiveName = `node-${nodeVersion}-${platform.os}-${platform.arch}.tar.xz`
     const nodeArchiveUrl = `https://nodejs.org/dist/${nodeVersion}/${nodeArchiveName}`
@@ -175,7 +203,7 @@ async function buildToolchainArtifact({ codexVersion, nodeVersion, platform, sto
         `--os=${platform.os}`,
         `--cpu=${platform.arch}`,
         '--libc=glibc',
-        `@openai/codex@${codexVersion}`,
+        `${definition.packageName}@${toolchainVersion}`,
       ],
       {
         cwd: repoRoot,
@@ -192,7 +220,7 @@ async function buildToolchainArtifact({ codexVersion, nodeVersion, platform, sto
     await mkdir(bundleBinDir, { recursive: true })
     await cp(extractedNodeDir, bundleRuntimeNodeDir, { recursive: true })
     await cp(packageDir, bundlePackageDir, { recursive: true })
-    await writeWrapperScripts(bundleBinDir)
+    await writeWrapperScripts(bundleBinDir, bundlePackageDir, definition.packageName)
     await stripMacMetadata(bundleDir)
 
     await mkdir(targetOutputDir, { recursive: true })
@@ -211,9 +239,10 @@ async function buildToolchainArtifact({ codexVersion, nodeVersion, platform, sto
   }
 }
 
-async function writeWrapperScripts(bundleBinDir) {
-  const codexWrapperPath = join(bundleBinDir, 'codex')
-  const nodeWrapperPath = join(bundleBinDir, 'node')
+async function writeWrapperScripts(bundleBinDir, bundlePackageDir, packageName) {
+  const installedPackageDir = join(bundlePackageDir, 'node_modules', ...packageName.split('/'))
+  const manifest = JSON.parse(await readFile(join(installedPackageDir, 'package.json'), 'utf8'))
+  const binField = normalizeBinField(manifest.bin, packageName)
   const commonPrefix = [
     '#!/bin/sh',
     'set -eu',
@@ -235,18 +264,23 @@ async function writeWrapperScripts(bundleBinDir) {
     '',
   ]
 
-  await writeFile(
-    codexWrapperPath,
-    [
-      ...commonPrefix,
-      'exec "$ROOT_DIR/runtime/node/bin/node" \\',
-      '  "$ROOT_DIR/package/node_modules/@openai/codex/bin/codex.js" \\',
-      '  "$@"',
-      '',
-    ].join('\n'),
-    'utf8',
-  )
+  for (const [binName, relativePath] of Object.entries(binField)) {
+    const wrapperPath = join(bundleBinDir, binName)
+    await writeFile(
+      wrapperPath,
+      [
+        ...commonPrefix,
+        'exec "$ROOT_DIR/runtime/node/bin/node" \\',
+        `  "$ROOT_DIR/package/node_modules/${packageName}/${relativePath}" \\`,
+        '  "$@"',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    await chmod(wrapperPath, 0o755)
+  }
 
+  const nodeWrapperPath = join(bundleBinDir, 'node')
   await writeFile(
     nodeWrapperPath,
     [
@@ -256,9 +290,33 @@ async function writeWrapperScripts(bundleBinDir) {
     ].join('\n'),
     'utf8',
   )
-
-  await chmod(codexWrapperPath, 0o755)
   await chmod(nodeWrapperPath, 0o755)
+}
+
+function normalizeBinField(binField, packageName) {
+  if (typeof binField === 'string') {
+    return {
+      [resolveToolchainKind(packageName) === 'claude-code' ? 'claude' : resolveToolchainKind(packageName)]: binField,
+    }
+  }
+
+  if (binField && typeof binField === 'object') {
+    return binField
+  }
+
+  throw new Error(`Package ${packageName} does not expose a usable bin entry`)
+}
+
+function resolveToolchainKind(packageName) {
+  if (packageName === '@openai/codex') {
+    return 'codex'
+  }
+
+  if (packageName === '@anthropic-ai/claude-code') {
+    return 'claude-code'
+  }
+
+  throw new Error(`Unsupported package name: ${packageName}`)
 }
 
 async function stripMacMetadata(directoryPath) {

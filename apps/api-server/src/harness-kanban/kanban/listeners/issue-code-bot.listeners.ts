@@ -6,7 +6,6 @@ import { SystemBotId } from '@/user/constants/user.constants'
 import { Injectable, Logger } from '@nestjs/common'
 import { OnEvent } from '@nestjs/event-emitter'
 import { CommonPropertyOperationType, SystemPropertyId } from '@repo/shared/property/constants'
-import { HarnessWorkerIssueTrigger, HarnessWorkerIssueTriggerType } from '../../worker/harness-worker-trigger.types'
 import {
   getHarnessWorkerDispatchQueueName,
   HARNESS_WORKER_CLAIMED_ISSUE_STATUSES,
@@ -18,7 +17,8 @@ import {
   HARNESS_WORKER_PLANNING_ISSUE_STATUS,
   HARNESS_WORKER_QUEUED_ISSUE_STATUS,
   HARNESS_WORKER_TERMINAL_ISSUE_STATUSES,
-} from '../../worker/harness-worker.constants'
+} from '../../worker/worker.constants'
+import { HarnessWorkerIssueTrigger, HarnessWorkerIssueTriggerType } from '../../worker/worker.types'
 import { TODO_STATUS_ID } from '../constants/code-bot.constants'
 
 type IssueState = {

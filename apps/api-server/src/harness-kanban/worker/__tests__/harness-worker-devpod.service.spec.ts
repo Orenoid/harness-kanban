@@ -1,18 +1,21 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { CodingAgentService } from '@/coding-agent/coding-agent.service'
 import { PrismaService } from '@/database/prisma.service'
 import { GithubService } from '@/github/github.service'
+import { CodingAgentSnapshotService } from '@/harness-kanban/coding-agent/coding-agent-snapshot.service'
 import { ConfigService } from '@nestjs/config'
-import { HarnessWorkerDevpodService } from '../harness-worker-devpod.service'
-import { HarnessWorkerToolchainService } from '../harness-worker-toolchain.service'
+import { HarnessWorkerDevpodService } from '../devpod.service'
+import { HarnessWorkerCodingAgentProviderRegistry } from '../providers/coding-agent-provider.registry'
+import { HarnessWorkerCodexProvider } from '../providers/harness-worker-codex.provider'
+import { HarnessWorkerToolchainService } from '../toolchain.service'
 
 describe('HarnessWorkerDevpodService', () => {
   let service: HarnessWorkerDevpodService
   let configService: jest.Mocked<ConfigService>
-  let codingAgentService: jest.Mocked<CodingAgentService>
+  let codingAgentSnapshotService: jest.Mocked<CodingAgentSnapshotService>
   let githubService: jest.Mocked<GithubService>
+  let providerRegistry: jest.Mocked<HarnessWorkerCodingAgentProviderRegistry>
   let toolchainService: jest.Mocked<HarnessWorkerToolchainService>
   let findProjectBindingMock: jest.Mock
   let findProjectMock: jest.Mock
@@ -22,15 +25,19 @@ describe('HarnessWorkerDevpodService', () => {
     configService = {
       get: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>
-    codingAgentService = {
+    codingAgentSnapshotService = {
       getIssueCodingAgentSnapshot: jest.fn(),
-    } as unknown as jest.Mocked<CodingAgentService>
+    } as unknown as jest.Mocked<CodingAgentSnapshotService>
     githubService = {
       getTokenForWorkspace: jest.fn(),
     } as unknown as jest.Mocked<GithubService>
     toolchainService = {
       resolveCodexToolchainArtifact: jest.fn(),
+      resolveToolchainArtifact: jest.fn(),
     } as unknown as jest.Mocked<HarnessWorkerToolchainService>
+    providerRegistry = {
+      getProvider: jest.fn().mockReturnValue(new HarnessWorkerCodexProvider(toolchainService)),
+    } as unknown as jest.Mocked<HarnessWorkerCodingAgentProviderRegistry>
 
     findProjectBindingMock = jest.fn()
     findProjectMock = jest.fn()
@@ -53,8 +60,8 @@ describe('HarnessWorkerDevpodService', () => {
     service = new HarnessWorkerDevpodService(
       prismaService,
       configService,
-      codingAgentService,
-      toolchainService,
+      codingAgentSnapshotService,
+      providerRegistry,
       githubService,
     )
   })
@@ -79,7 +86,7 @@ describe('HarnessWorkerDevpodService', () => {
     await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBeNull()
   })
 
-  it('returns null when no Codex coding agent is configured', async () => {
+  it('returns null when no coding agent is configured', async () => {
     findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
     findProjectMock.mockResolvedValue({
       env_config: null,
@@ -88,7 +95,7 @@ describe('HarnessWorkerDevpodService', () => {
       repo_base_branch: 'main',
     })
     githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
-    codingAgentService.getIssueCodingAgentSnapshot.mockResolvedValue(null)
+    codingAgentSnapshotService.getIssueCodingAgentSnapshot.mockResolvedValue(null)
 
     await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBeNull()
   })
@@ -152,7 +159,7 @@ describe('HarnessWorkerDevpodService', () => {
       repo_base_branch: 'feature/planning',
     })
     githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
-    codingAgentService.getIssueCodingAgentSnapshot.mockResolvedValue({
+    codingAgentSnapshotService.getIssueCodingAgentSnapshot.mockResolvedValue({
       id: 'agent-1',
       name: 'Primary Codex',
       type: 'codex',
@@ -169,7 +176,7 @@ describe('HarnessWorkerDevpodService', () => {
       createdAt: '2026-04-03T00:00:00.000Z',
       updatedAt: '2026-04-03T00:00:00.000Z',
     })
-    toolchainService.resolveCodexToolchainArtifact.mockResolvedValue({
+    toolchainService.resolveToolchainArtifact.mockResolvedValue({
       archivePath: '/opt/harness-kanban/toolchains/codex/0.116.0/codex-toolchain-linux-x64.tar.gz',
       kind: 'codex',
       version: '0.116.0',
@@ -380,7 +387,7 @@ describe('HarnessWorkerDevpodService', () => {
       }),
     )
 
-    expect(toolchainService.resolveCodexToolchainArtifact).toHaveBeenCalledWith({
+    expect(toolchainService.resolveToolchainArtifact).toHaveBeenCalledWith('codex', {
       arch: 'x64',
       os: 'linux',
     })
@@ -407,15 +414,19 @@ describe('HarnessWorkerDevpodService', () => {
     expect(injectCommand).toContain('cat > "$launcher_path" <<EOF')
     expect(injectCommand).toContain('case ":$PATH:" in')
     expect(injectCommand).toContain('. "$HOME/.harness-kanban/path.sh"')
-    expect(injectCommand).toContain('ln -sfn "$HOME/.harness-kanban/bin/codex" "$global_bin_dir/codex"')
+    expect(injectCommand).toContain('for bin_path in "$HOME/.harness-kanban/bin"/*; do')
+    expect(injectCommand).toContain('ln -sfn "$bin_path" "$global_bin_dir/$(basename "$bin_path")"')
     expect(injectCommand).toContain('exec "\\$HOME/.harness-kanban/toolchains/codex/current/bin/$bin_name" "\\$@"')
 
-    const authCommand = executeCommandSpy.mock.calls[2]?.[1]?.[3]
+    const workspaceCommands = executeCommandSpy.mock.calls
+      .map(call => call[1]?.[3])
+      .filter((value): value is string => typeof value === 'string')
+    const authCommand = workspaceCommands.find(command => command.includes('mkdir -p ~/.codex'))
     expect(authCommand).toContain('mkdir -p ~/.codex')
     expect(authCommand).toContain(codexAuthJsonBase64)
     expect(authCommand).toContain('base64 -d > ~/.codex/auth.json')
 
-    const mcpCommand = executeCommandSpy.mock.calls[3]?.[1]?.[3]
+    const mcpCommand = workspaceCommands.find(command => command.includes('"$HOME/.harness-kanban/bin/codex" mcp add'))
     expect(mcpCommand).toContain('"$HOME/.harness-kanban/bin/codex" mcp remove')
     expect(mcpCommand).toContain('"$HOME/.harness-kanban/bin/codex" mcp add')
     expect(mcpCommand).toContain('docs')
@@ -425,13 +436,15 @@ describe('HarnessWorkerDevpodService', () => {
     expect(mcpCommand).toContain('scripts/mcp.js')
     expect(mcpCommand).toContain('--port')
     expect(mcpCommand).toContain('3000')
+    expect(mcpCommand).toContain('startup_timeout_sec')
+    expect(mcpCommand).toContain("'\"'\"'30'\"'\"'")
 
-    const gitIdentityCommand = executeCommandSpy.mock.calls[4]?.[1]?.[3]
+    const gitIdentityCommand = workspaceCommands.find(command => command.includes('git config --global user.name'))
     expect(gitIdentityCommand).toContain('git config --global user.name')
     expect(gitIdentityCommand).toContain('Code Bot')
     expect(gitIdentityCommand).toContain('bot_code_bot@harness-kanban.local')
 
-    const gitAuthCommand = executeCommandSpy.mock.calls[5]?.[1]?.[3]
+    const gitAuthCommand = workspaceCommands.find(command => command.includes('git config --global url.'))
     expect(gitAuthCommand).toContain('git config --global url.')
     expect(gitAuthCommand).toContain('https://x-access-token:github-token-value@github.com/')
     expect(gitAuthCommand).toContain('git@github.com:')
@@ -507,7 +520,7 @@ describe('HarnessWorkerDevpodService', () => {
       repo_base_branch: 'main',
     })
     githubService.getTokenForWorkspace.mockResolvedValue('github-token-value')
-    codingAgentService.getIssueCodingAgentSnapshot.mockResolvedValue({
+    codingAgentSnapshotService.getIssueCodingAgentSnapshot.mockResolvedValue({
       id: 'agent-1',
       name: 'Primary Codex',
       type: 'codex',
@@ -521,7 +534,7 @@ describe('HarnessWorkerDevpodService', () => {
       createdAt: '2026-04-03T00:00:00.000Z',
       updatedAt: '2026-04-03T00:00:00.000Z',
     })
-    toolchainService.resolveCodexToolchainArtifact.mockResolvedValue({
+    toolchainService.resolveToolchainArtifact.mockResolvedValue({
       archivePath: '/opt/harness-kanban/toolchains/codex/0.116.0/codex-toolchain-linux-x64.tar.gz',
       kind: 'codex',
       version: '0.116.0',

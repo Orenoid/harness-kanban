@@ -4,9 +4,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { CodingAgentService } from '@/coding-agent/coding-agent.service'
 import { PrismaService } from '@/database/prisma.service'
 import { GithubService } from '@/github/github.service'
+import { CodingAgentSnapshotService } from '@/harness-kanban/coding-agent/coding-agent-snapshot.service'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@repo/database'
@@ -16,29 +16,12 @@ import {
   parseProjectMcpConfig,
   ProjectEnvConfig,
   ProjectMcpConfig,
-  ProjectMcpServerConfig,
 } from '@repo/shared/project/types'
 import { SystemPropertyId } from '@repo/shared/property/constants'
-import {
-  getCodexAuthSensitiveValues,
-  resolveCodexAuthConfig,
-  ResolvedCodexAuthConfig,
-} from './harness-worker-codex-auth'
-import { HarnessWorkerToolchainService } from './harness-worker-toolchain.service'
+import { HarnessWorkerCodingAgentProviderRegistry } from './providers/coding-agent-provider.registry'
+import { DevpodCommandResult, WorkspaceCommandOptions } from './providers/coding-agent-provider.types'
 import type { ExecFileOptions } from 'node:child_process'
-import type { HarnessWorkerToolchainPlatform } from './harness-worker-toolchain.service'
-
-type DevpodCommandResult = {
-  stderr: string
-  stdout: string
-}
-
-type WorkspaceCommandOptions = {
-  forwardEnv?: Record<string, string>
-  label?: string
-  maxBuffer?: number
-  timeoutMs?: number
-}
+import type { HarnessWorkerToolchainArtifact, HarnessWorkerToolchainPlatform } from './toolchain.service'
 
 type IssueProjectRepository = {
   envConfig: ProjectEnvConfig | null
@@ -177,8 +160,8 @@ export class HarnessWorkerDevpodService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
-    private readonly codingAgentService: CodingAgentService,
-    private readonly toolchainService: HarnessWorkerToolchainService,
+    private readonly codingAgentSnapshotService: CodingAgentSnapshotService,
+    private readonly codingAgentProviderRegistry: HarnessWorkerCodingAgentProviderRegistry,
     private readonly githubService: GithubService,
   ) {}
 
@@ -204,21 +187,13 @@ export class HarnessWorkerDevpodService {
       return null
     }
 
-    let codexAuthConfig: ResolvedCodexAuthConfig | null = null
-    try {
-      codexAuthConfig = await resolveCodexAuthConfig(this.codingAgentService, issueId)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.logger.error(`Cannot create DevPod workspace for issue ${issueId}: failed to load Codex auth: ${message}`)
+    const codingAgent = await this.codingAgentSnapshotService.getIssueCodingAgentSnapshot(issueId)
+    if (!codingAgent) {
+      this.logger.error(`Cannot create DevPod workspace for issue ${issueId}: coding agent snapshot is missing`)
       return null
     }
 
-    if (!codexAuthConfig) {
-      this.logger.error(
-        `Cannot create DevPod workspace for issue ${issueId}: no usable Codex coding agent is configured`,
-      )
-      return null
-    }
+    const provider = this.codingAgentProviderRegistry.getProvider(codingAgent.type)
 
     const workspaceName = this.buildWorkspaceName(issueId)
     const cloneUrl = this.normalizeCloneUrl(repository.githubRepoUrl)
@@ -255,8 +230,13 @@ export class HarnessWorkerDevpodService {
         },
       )
 
-      this.logger.log(`Injecting Codex toolchain into workspace ${workspaceName}`)
-      await this.initializeWorkspaceCodex(workspaceName, env, cloneUrl, token, codexAuthConfig, repository.mcpConfig)
+      this.logger.log(`Preparing coding agent workspace ${workspaceName} for provider ${codingAgent.type}`)
+      await this.initializeWorkspaceCodingAgent(workspaceName, env, cloneUrl, token, provider, {
+        githubRepoUrl: cloneUrl,
+        githubToken: token,
+        mcpConfig: repository.mcpConfig,
+        settings: codingAgent.settings,
+      })
       this.logger.log(`Collecting DevPod metadata for workspace ${workspaceName}`)
       await this.collectAndPersistWorkspaceMetadata(issueId, workspaceName, env)
 
@@ -265,7 +245,7 @@ export class HarnessWorkerDevpodService {
       )
       return workspaceName
     } catch (error) {
-      const sensitiveValues: string[] = [token, ...getCodexAuthSensitiveValues(codexAuthConfig)].filter(
+      const sensitiveValues: string[] = [token, ...provider.getSensitiveValues(codingAgent.settings)].filter(
         (value): value is string => typeof value === 'string',
       )
       const message = this.redactSensitiveData(error instanceof Error ? error.message : String(error), sensitiveValues)
@@ -299,6 +279,17 @@ export class HarnessWorkerDevpodService {
         this.logger.log(`Running workspace command for ${workspaceName}: ${options.label}`)
       }
       return await this.executeWorkspaceCommand(workspaceName, env, command, options)
+    } finally {
+      await this.cleanupDockerConfigDirectory(dockerConfigDirectory)
+    }
+  }
+
+  async resolveWorkspaceRemoteUser(workspaceName: string): Promise<string | null> {
+    const dockerConfigDirectory = await this.prepareDockerConfigDirectory()
+
+    try {
+      const env = this.buildDevpodEnv(dockerConfigDirectory.path)
+      return await this.detectWorkspaceRemoteUser(workspaceName, env)
     } finally {
       await this.cleanupDockerConfigDirectory(dockerConfigDirectory)
     }
@@ -373,77 +364,34 @@ export class HarnessWorkerDevpodService {
     return `harness-kanban-issue-${issueId}`
   }
 
-  private async initializeWorkspaceCodex(
+  private async initializeWorkspaceCodingAgent(
     workspaceName: string,
     env: NodeJS.ProcessEnv,
     githubRepoUrl: string,
     githubToken: string,
-    codexAuthConfig: ResolvedCodexAuthConfig,
-    mcpConfig: ProjectMcpConfig | null,
+    provider: ReturnType<HarnessWorkerCodingAgentProviderRegistry['getProvider']>,
+    input: {
+      githubRepoUrl: string
+      githubToken: string
+      mcpConfig: ProjectMcpConfig | null
+      settings: unknown
+    },
   ): Promise<void> {
     const platform = await this.detectWorkspacePlatform(workspaceName, env)
-    const artifact = await this.toolchainService.resolveCodexToolchainArtifact(platform)
-
-    await this.injectWorkspaceCodexToolchain(workspaceName, env, artifact.archivePath, artifact.version)
-
-    if (codexAuthConfig.authMode === 'auth-json') {
-      const codexAuthJsonBase64 = Buffer.from(codexAuthConfig.authJson, 'utf8').toString('base64')
-      await this.executeWorkspaceCommand(
-        workspaceName,
-        env,
-        `mkdir -p ~/.codex && printf %s ${this.quoteShellArg(codexAuthJsonBase64)} | base64 -d > ~/.codex/auth.json`,
-        {
-          label: 'seed Codex auth.json',
-          maxBuffer: 10 * 1024 * 1024,
-        },
-      )
-    }
-
-    await this.configureWorkspaceCodexMcp(workspaceName, env, mcpConfig)
+    const remoteUser = await this.detectWorkspaceRemoteUser(workspaceName, env)
     await this.configureWorkspaceGitIdentity(workspaceName, env)
     await this.configureWorkspaceGitAuth(workspaceName, env, githubRepoUrl, githubToken)
-  }
 
-  // TODO codex specific logic needs to be encapsulated after a common agent-executor interface is set
-  private async configureWorkspaceCodexMcp(
-    workspaceName: string,
-    env: NodeJS.ProcessEnv,
-    mcpConfig: ProjectMcpConfig | null,
-  ): Promise<void> {
-    if (!mcpConfig || Object.keys(mcpConfig).length === 0) {
-      return
-    }
-
-    const commands = Object.entries(mcpConfig).flatMap(([name, serverConfig]) => [
-      `"$HOME/.harness-kanban/bin/codex" mcp remove ${this.quoteShellArg(name)} >/dev/null 2>&1 || true`,
-      this.buildCodexMcpAddCommand(name, serverConfig),
-    ])
-
-    await this.executeWorkspaceCommand(workspaceName, env, ['set -eu', ...commands].join('\n'), {
-      label: 'configure Codex MCP servers',
-      maxBuffer: 10 * 1024 * 1024,
+    await provider.prepareWorkspace({
+      mcpConfig: input.mcpConfig,
+      platform,
+      remoteUser,
+      settings: input.settings as never,
+      workspaceName,
+      executeWorkspaceCommand: (command, options) => this.executeWorkspaceCommand(workspaceName, env, command, options),
+      injectToolchainArtifact: artifact => this.injectWorkspaceToolchain(workspaceName, env, artifact),
+      quoteShellArg: value => this.quoteShellArg(value),
     })
-  }
-
-  private buildCodexMcpAddCommand(name: string, serverConfig: ProjectMcpServerConfig): string {
-    if (serverConfig.type === 'streamable-http') {
-      return `"$HOME/.harness-kanban/bin/codex" mcp add ${this.quoteShellArg(name)} --url ${this.quoteShellArg(serverConfig.url)}`
-    }
-
-    const envArgs = Object.entries(serverConfig.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`])
-    const quotedEnvArgs = envArgs.map(value => this.quoteShellArg(value)).join(' ')
-    const quotedCommandArgs = [serverConfig.command, ...(serverConfig.args ?? [])]
-      .map(value => this.quoteShellArg(value))
-      .join(' ')
-
-    return [
-      `"$HOME/.harness-kanban/bin/codex" mcp add ${this.quoteShellArg(name)}`,
-      quotedEnvArgs,
-      '--',
-      quotedCommandArgs,
-    ]
-      .filter(Boolean)
-      .join(' ')
   }
 
   private async detectWorkspacePlatform(
@@ -479,21 +427,28 @@ export class HarnessWorkerDevpodService {
     }
   }
 
-  private async injectWorkspaceCodexToolchain(
+  private async detectWorkspaceRemoteUser(workspaceName: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+    const workspace = await this.readWorkspaceRecord(workspaceName, env)
+    const context = this.toNullableString(workspace?.context) ?? 'default'
+    const result = await this.readWorkspaceResult(context, workspaceName, env)
+
+    return this.toNullableString(result?.MergedConfig?.remoteUser)
+  }
+
+  private async injectWorkspaceToolchain(
     workspaceName: string,
     env: NodeJS.ProcessEnv,
-    archivePath: string,
-    version: string,
+    artifact: HarnessWorkerToolchainArtifact,
   ): Promise<void> {
     const command = [
       'set -eu',
-      'mkdir -p "$HOME/.harness-kanban/toolchains/codex" "$HOME/.harness-kanban/bin"',
-      `version_name=${this.quoteShellArg(version)}`,
-      'target_dir="$HOME/.harness-kanban/toolchains/codex/$version_name"',
+      `mkdir -p "$HOME/.harness-kanban/toolchains/${artifact.kind}" "$HOME/.harness-kanban/bin"`,
+      `version_name=${this.quoteShellArg(artifact.version)}`,
+      `target_dir="$HOME/.harness-kanban/toolchains/${artifact.kind}/$version_name"`,
       'rm -rf "$target_dir"',
       'mkdir -p "$target_dir"',
       'tar -xzf - -C "$target_dir"',
-      'ln -sfn "$target_dir" "$HOME/.harness-kanban/toolchains/codex/current"',
+      `ln -sfn "$target_dir" "$HOME/.harness-kanban/toolchains/${artifact.kind}/current"`,
       'if [ -d "$target_dir/bin" ]; then',
       '  for bin_path in "$target_dir"/bin/*; do',
       '    if [ -f "$bin_path" ]; then',
@@ -503,7 +458,7 @@ export class HarnessWorkerDevpodService {
       '      cat > "$launcher_path" <<EOF',
       '#!/bin/sh',
       'set -eu',
-      'exec "\\$HOME/.harness-kanban/toolchains/codex/current/bin/$bin_name" "\\$@"',
+      `exec "\\$HOME/.harness-kanban/toolchains/${artifact.kind}/current/bin/$bin_name" "\\$@"`,
       'EOF',
       '      chmod +x "$launcher_path"',
       '    fi',
@@ -542,14 +497,23 @@ export class HarnessWorkerDevpodService {
       '  IFS="$old_ifs"',
       'fi',
       'if [ -n "$global_bin_dir" ]; then',
-      '  ln -sfn "$HOME/.harness-kanban/bin/codex" "$global_bin_dir/codex"',
+      '  for bin_path in "$HOME/.harness-kanban/bin"/*; do',
+      '    if [ -f "$bin_path" ]; then',
+      '      ln -sfn "$bin_path" "$global_bin_dir/$(basename "$bin_path")"',
+      '    fi',
+      '  done',
       'fi',
     ].join('\n')
 
-    await this.executeCommandWithInput('devpod', this.buildWorkspaceSshArgs(workspaceName, command), archivePath, {
-      env,
-      maxBuffer: 10 * 1024 * 1024,
-    })
+    await this.executeCommandWithInput(
+      'devpod',
+      this.buildWorkspaceSshArgs(workspaceName, command),
+      artifact.archivePath,
+      {
+        env,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    )
   }
 
   private async collectAndPersistWorkspaceMetadata(

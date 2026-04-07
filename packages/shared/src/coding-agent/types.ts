@@ -2,10 +2,13 @@ import { z } from 'zod'
 
 const codingAgentNameMaxLength = 120
 
+export const DEFAULT_CODEX_MODEL = 'gpt-5.3-codex'
+export const DEFAULT_CLAUDE_CODE_MODEL = 'sonnet'
+
 export const codingAgentTypeSchema = z.enum(['codex', 'claude-code'])
 export type CodingAgentType = z.infer<typeof codingAgentTypeSchema>
 
-export const configurableCodingAgentTypeSchema = z.enum(['codex'])
+export const configurableCodingAgentTypeSchema = z.enum(['codex', 'claude-code'])
 export type ConfigurableCodingAgentType = z.infer<typeof configurableCodingAgentTypeSchema>
 
 export const codingAgentManagementAvailabilitySchema = z.enum(['available', 'coming-soon'])
@@ -16,8 +19,16 @@ export type CodexReasoningEffort = z.infer<typeof codexReasoningEffortSchema>
 
 const codexModelSchema = z.string().trim().min(1, 'Codex model is required')
 const claudeCodeModelSchema = z.string().trim().min(1, 'Claude Code model is required')
+const claudeCodeBaseUrlSchema = z.string().trim().url('Claude Code base URL must be a valid URL')
 const apiKeySchema = z.string().trim().min(1, 'API key is required')
 const authJsonSchema = z.object({}).catchall(z.unknown())
+
+export const codingAgentExecutionStateSchema = z
+  .object({
+    sessionId: z.string().trim().min(1).optional(),
+  })
+  .strict()
+export type CodingAgentExecutionState = z.infer<typeof codingAgentExecutionStateSchema>
 
 export const codexAuthJsonSettingsSchema = z
   .object({
@@ -46,6 +57,7 @@ export type CodexCodingAgentSettings = z.infer<typeof codexCodingAgentSettingsSc
 export const claudeCodeCodingAgentSettingsSchema = z
   .object({
     apiKey: apiKeySchema,
+    baseUrl: claudeCodeBaseUrlSchema,
     model: claudeCodeModelSchema,
   })
   .strict()
@@ -63,6 +75,7 @@ export type CodexCodingAgentManagementSettings = z.infer<typeof codexCodingAgent
 export const claudeCodeCodingAgentManagementSettingsSchema = z
   .object({
     model: claudeCodeModelSchema,
+    baseUrl: claudeCodeBaseUrlSchema,
     hasCredential: z.boolean(),
   })
   .strict()
@@ -85,6 +98,28 @@ export const updateCodexCodingAgentManagementSettingsSchema = z
   })
   .strict()
 export type UpdateCodexCodingAgentManagementSettings = z.infer<typeof updateCodexCodingAgentManagementSettingsSchema>
+
+export const createClaudeCodeCodingAgentManagementSettingsSchema = z
+  .object({
+    apiKey: apiKeySchema,
+    baseUrl: claudeCodeBaseUrlSchema,
+    model: claudeCodeModelSchema,
+  })
+  .strict()
+export type CreateClaudeCodeCodingAgentManagementSettings = z.infer<
+  typeof createClaudeCodeCodingAgentManagementSettingsSchema
+>
+
+export const updateClaudeCodeCodingAgentManagementSettingsSchema = z
+  .object({
+    apiKey: apiKeySchema.optional(),
+    baseUrl: claudeCodeBaseUrlSchema,
+    model: claudeCodeModelSchema,
+  })
+  .strict()
+export type UpdateClaudeCodeCodingAgentManagementSettings = z.infer<
+  typeof updateClaudeCodeCodingAgentManagementSettingsSchema
+>
 
 export const codingAgentSettingsSchemaByType = {
   codex: codexCodingAgentSettingsSchema,
@@ -113,6 +148,7 @@ export type CodingAgentManagementSettings<TType extends CodingAgentType = Coding
 
 export type CreateCodingAgentManagementSettingsByType = {
   codex: CreateCodexCodingAgentManagementSettings
+  'claude-code': CreateClaudeCodeCodingAgentManagementSettings
 }
 
 export type CreateCodingAgentManagementSettings<
@@ -121,6 +157,7 @@ export type CreateCodingAgentManagementSettings<
 
 export type UpdateCodingAgentManagementSettingsByType = {
   codex: UpdateCodexCodingAgentManagementSettings
+  'claude-code': UpdateClaudeCodeCodingAgentManagementSettings
 }
 
 export type UpdateCodingAgentManagementSettings<
@@ -144,8 +181,9 @@ export const CODING_AGENT_DEFINITIONS = [
   {
     type: 'claude-code',
     label: 'Claude Code',
-    description: 'Claude Code configuration is planned, but not yet available in Settings.',
-    managementAvailability: 'coming-soon',
+    description:
+      'Configure Claude Code execution with a third-party Anthropic-compatible base URL, API key, and CLI model.',
+    managementAvailability: 'available',
   },
 ] as const satisfies readonly CodingAgentDefinition[]
 
@@ -279,6 +317,7 @@ export const normalizeClaudeCodeCodingAgentSettings = (
 
   return {
     apiKey: settings.apiKey.trim(),
+    baseUrl: settings.baseUrl.trim(),
     model: settings.model.trim(),
   }
 }
@@ -298,6 +337,19 @@ export const normalizeCodingAgentSettings = <TType extends CodingAgentType>(
   return normalizeClaudeCodeCodingAgentSettings(
     settings as CodingAgentSettings<'claude-code'>,
   ) as CodingAgentSettings<TType>
+}
+
+export const parseCodingAgentExecutionState = (value: unknown): CodingAgentExecutionState | null => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  const parsed = codingAgentExecutionStateSchema.safeParse(value)
+  if (!parsed.success) {
+    return null
+  }
+
+  return parsed.data
 }
 
 export const parseCodingAgentSettings = <TType extends CodingAgentType>(

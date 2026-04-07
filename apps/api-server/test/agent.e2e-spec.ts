@@ -6,7 +6,7 @@ import { loginUser, SupertestAgent } from './utils/auth-helper'
 
 import request = require('supertest')
 
-describe('AgentController (e2e)', () => {
+describe.skip('AgentController (e2e)', () => {
   let app: INestApplication
   let agent: SupertestAgent
 

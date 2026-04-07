@@ -54,9 +54,27 @@ type GithubPullRequest = {
   html_url?: string
   mergeable?: boolean | null
   mergeable_state?: string | null
+  node_id?: string
   number?: number
   state?: string
   title?: string
+}
+
+type GithubGraphqlError = {
+  message?: string
+}
+
+type GithubMarkPullRequestReadyForReviewResponse = {
+  data?: {
+    markPullRequestReadyForReview?: {
+      pullRequest?: {
+        isDraft?: boolean
+        number?: number
+        url?: string | null
+      }
+    }
+  }
+  errors?: GithubGraphqlError[]
 }
 
 type GithubPullRequestReview = {
@@ -1003,13 +1021,31 @@ export class HarnessWorkerGithubService {
     pullRequestNumber: number,
     input: EnsurePullRequestInput,
   ): Promise<EnsurePullRequestResult> {
-    const pullRequest = await this.githubRequest<GithubPullRequest>(
-      githubToken,
-      `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}/ready_for_review`,
-      {
-        method: 'POST',
-      },
-    )
+    let pullRequest: GithubPullRequest
+    try {
+      pullRequest = await this.githubRequest<GithubPullRequest>(
+        githubToken,
+        `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}/ready_for_review`,
+        {
+          method: 'POST',
+        },
+      )
+    } catch (error) {
+      if (!this.isGithubNotFoundError(error)) {
+        throw error
+      }
+
+      this.logger.warn(
+        `GitHub REST ready_for_review returned 404 for issue ${input.issueId}; falling back to GraphQL mutation.`,
+      )
+      pullRequest = await this.markPullRequestReadyForReviewViaGraphql(
+        githubToken,
+        owner,
+        repo,
+        pullRequestNumber,
+        input,
+      )
+    }
 
     if (!pullRequest.html_url || typeof pullRequest.number !== 'number') {
       throw new Error(`GitHub did not return a ready-for-review pull request URL for issue ${input.issueId}`)
@@ -1018,6 +1054,54 @@ export class HarnessWorkerGithubService {
     return {
       number: pullRequest.number,
       url: pullRequest.html_url,
+    }
+  }
+
+  private async markPullRequestReadyForReviewViaGraphql(
+    githubToken: string,
+    owner: string,
+    repo: string,
+    pullRequestNumber: number,
+    input: EnsurePullRequestInput,
+  ): Promise<GithubPullRequest> {
+    const pullRequestDetail = await this.githubRequest<GithubPullRequest>(
+      githubToken,
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${pullRequestNumber}`,
+      {
+        method: 'GET',
+      },
+    )
+    const pullRequestId = pullRequestDetail.node_id?.trim()
+    if (!pullRequestId) {
+      throw new Error(
+        `GitHub did not return a node id for pull request #${pullRequestNumber} on issue ${input.issueId}`,
+      )
+    }
+
+    const response = await this.githubGraphqlRequest<GithubMarkPullRequestReadyForReviewResponse>(githubToken, {
+      query:
+        'mutation($pullRequestId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) { pullRequest { number isDraft url } } }',
+      variables: {
+        pullRequestId,
+      },
+    })
+
+    const graphqlErrors =
+      response.errors?.map(error => error.message?.trim()).filter((message): message is string => Boolean(message)) ??
+      []
+    if (graphqlErrors.length > 0) {
+      throw new Error(`GitHub GraphQL request failed: ${graphqlErrors.join('; ')}`)
+    }
+
+    const readyPullRequest = response.data?.markPullRequestReadyForReview?.pullRequest
+    if (!readyPullRequest?.url || typeof readyPullRequest.number !== 'number') {
+      throw new Error(`GitHub GraphQL did not return full ready-for-review details for issue ${input.issueId}`)
+    }
+
+    return {
+      draft: Boolean(readyPullRequest.isDraft),
+      html_url: readyPullRequest.url,
+      number: readyPullRequest.number,
     }
   }
 
@@ -1144,6 +1228,41 @@ export class HarnessWorkerGithubService {
     }
 
     return (await response.json()) as T
+  }
+
+  private async githubGraphqlRequest<T>(
+    token: string,
+    input: {
+      query: string
+      variables?: Record<string, unknown>
+    },
+  ): Promise<T> {
+    const response = await fetch('https://api.github.com/graphql', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'harness-kanban-worker',
+      },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(DEFAULT_GITHUB_API_TIMEOUT_MS),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`GitHub GraphQL request failed (${response.status}): ${errorText || response.statusText}`)
+    }
+
+    return (await response.json()) as T
+  }
+
+  private isGithubNotFoundError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false
+    }
+
+    return error.message.includes('GitHub API request failed (404):')
   }
 
   private getPositiveInteger(key: string, fallback: number): number {

@@ -1,4 +1,4 @@
-import { CodingAgentService } from '@/coding-agent/coding-agent.service'
+import { CodingAgentService } from '@/harness-kanban/coding-agent/coding-agent.service'
 import {
   PreCreateIssueHook,
   PreCreateIssueHookContext,
@@ -20,15 +20,15 @@ import {
 
 // TODO planning, in_progres shouldn't be allowed
 const CODE_BOT_ASSIGNABLE_STATUS_IDS = new Set([TODO_STATUS_ID, 'planning', 'in_progress'])
-const CODE_BOT_CODING_AGENT_TYPE = 'codex' as const
 
 const toNullableString = (value: unknown): string | null =>
   typeof value === 'string' && value.length > 0 ? value : null
 
 const validateCodeBotCodingAgentConfiguration = async (
   codingAgentService: CodingAgentService,
+  workspaceId: string,
 ): Promise<ValidationResult> => {
-  const hasConfiguredAgent = await codingAgentService.hasCodingAgentConfigured(CODE_BOT_CODING_AGENT_TYPE)
+  const hasConfiguredAgent = await codingAgentService.hasCodingAgentConfigured(workspaceId)
   if (hasConfiguredAgent) {
     return { valid: true }
   }
@@ -52,7 +52,7 @@ export class CodeBotCreateHook implements PreCreateIssueHook {
 
     const statusId = toNullableString(context.getRequestedValue(SystemPropertyId.STATUS))
     if (statusId === TODO_STATUS_ID) {
-      return validateCodeBotCodingAgentConfiguration(this.codingAgentService)
+      return validateCodeBotCodingAgentConfiguration(this.codingAgentService, context.workspaceId)
     }
 
     return {
@@ -75,7 +75,7 @@ export class CodeBotAssigneeHook implements PreUpdateIssueHook {
 
     const currentStatusId = toNullableString(context.getCurrentValue(SystemPropertyId.STATUS))
     if (currentStatusId && CODE_BOT_ASSIGNABLE_STATUS_IDS.has(currentStatusId)) {
-      return validateCodeBotCodingAgentConfiguration(this.codingAgentService)
+      return validateCodeBotCodingAgentConfiguration(this.codingAgentService, context.workspaceId)
     }
 
     return {

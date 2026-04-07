@@ -15,21 +15,11 @@ import {
 
 type CodingAgentRecord = {
   id: string
+  workspace_id: string
   name: string
   type: string
   settings: unknown
   is_default: boolean
-  created_at: Date
-  updated_at: Date
-}
-
-type IssueCodingAgentSnapshotRecord = {
-  id: string
-  issue_id: number
-  source_coding_agent_id: string | null
-  name: string
-  type: string
-  settings: unknown
   created_at: Date
   updated_at: Date
 }
@@ -52,8 +42,9 @@ export class CodingAgentService {
     }
 
     const normalizedInput = this.normalizeCreateInput(input)
-    const existingAgent = await this.prisma.client.coding_agent.findUnique({
+    const existingAgent = await this.prisma.client.coding_agent.findFirst({
       where: {
+        workspace_id: workspaceId,
         name: normalizedInput.name,
       },
       select: {
@@ -69,7 +60,7 @@ export class CodingAgentService {
       if (normalizedInput.isDefault) {
         await tx.coding_agent.updateMany({
           where: {
-            type: normalizedInput.type,
+            workspace_id: workspaceId,
             is_default: true,
           },
           data: {
@@ -80,6 +71,7 @@ export class CodingAgentService {
 
       return tx.coding_agent.create({
         data: {
+          workspace_id: workspaceId,
           name: normalizedInput.name,
           type: normalizedInput.type,
           settings: this.serializeSettings(normalizedInput.settings),
@@ -98,7 +90,10 @@ export class CodingAgentService {
     }
 
     const codingAgents = await this.prisma.client.coding_agent.findMany({
-      orderBy: [{ type: 'asc' }, { is_default: 'desc' }, { created_at: 'asc' }],
+      where: {
+        workspace_id: workspaceId,
+      },
+      orderBy: [{ is_default: 'desc' }, { type: 'asc' }, { created_at: 'asc' }],
     })
 
     return codingAgents.map(codingAgent => this.toCodingAgentDetail(codingAgent))
@@ -110,12 +105,7 @@ export class CodingAgentService {
       throw new ForbiddenException('No access to view coding agents')
     }
 
-    const codingAgent = await this.prisma.client.coding_agent.findUnique({
-      where: {
-        id: codingAgentId,
-      },
-    })
-
+    const codingAgent = await this.findCodingAgentRecord(workspaceId, codingAgentId)
     if (!codingAgent) {
       throw new NotFoundException('Coding agent does not exist.')
     }
@@ -134,12 +124,7 @@ export class CodingAgentService {
       throw new ForbiddenException('No access to update coding agents')
     }
 
-    const existingAgent = await this.prisma.client.coding_agent.findUnique({
-      where: {
-        id: codingAgentId,
-      },
-    })
-
+    const existingAgent = await this.findCodingAgentRecord(workspaceId, codingAgentId)
     if (!existingAgent) {
       throw new NotFoundException('Coding agent does not exist.')
     }
@@ -147,9 +132,11 @@ export class CodingAgentService {
     const normalizedInput = this.normalizeUpdateInput(existingAgent, input)
 
     if (normalizedInput.name && normalizedInput.name !== existingAgent.name) {
-      const duplicate = await this.prisma.client.coding_agent.findUnique({
+      const duplicate = await this.prisma.client.coding_agent.findFirst({
         where: {
+          workspace_id: workspaceId,
           name: normalizedInput.name,
+          id: { not: codingAgentId },
         },
         select: {
           id: true,
@@ -161,14 +148,13 @@ export class CodingAgentService {
       }
     }
 
-    const targetType = normalizedInput.type ?? (existingAgent.type as CodingAgentType)
     const shouldBecomeDefault = normalizedInput.is_default === true
 
     const codingAgent = await this.prisma.client.$transaction(async tx => {
       if (shouldBecomeDefault) {
         await tx.coding_agent.updateMany({
           where: {
-            type: targetType,
+            workspace_id: workspaceId,
             is_default: true,
             id: { not: codingAgentId },
           },
@@ -195,15 +181,7 @@ export class CodingAgentService {
       throw new ForbiddenException('No access to delete coding agents')
     }
 
-    const existingAgent = await this.prisma.client.coding_agent.findUnique({
-      where: {
-        id: codingAgentId,
-      },
-      select: {
-        id: true,
-      },
-    })
-
+    const existingAgent = await this.findCodingAgentRecord(workspaceId, codingAgentId)
     if (!existingAgent) {
       throw new NotFoundException('Coding agent does not exist.')
     }
@@ -215,10 +193,10 @@ export class CodingAgentService {
     })
   }
 
-  async hasCodingAgentConfigured(type: CodingAgentType): Promise<boolean> {
+  async hasCodingAgentConfigured(workspaceId: string): Promise<boolean> {
     const codingAgent = await this.prisma.client.coding_agent.findFirst({
       where: {
-        type,
+        workspace_id: workspaceId,
       },
       select: {
         id: true,
@@ -229,114 +207,34 @@ export class CodingAgentService {
     return Boolean(codingAgent)
   }
 
-  async getDefaultCodingAgentByType(type: CodingAgentType): Promise<CodingAgentDetail | null> {
+  async getDefaultCodingAgent(workspaceId: string): Promise<CodingAgentDetail | null> {
     const codingAgent = await this.prisma.client.coding_agent.findFirst({
       where: {
-        type,
+        workspace_id: workspaceId,
         is_default: true,
       },
       orderBy: [{ created_at: 'asc' }],
     })
 
-    if (!codingAgent) {
-      return null
-    }
-
-    return this.toCodingAgentDetail(codingAgent)
+    return codingAgent ? this.toCodingAgentDetail(codingAgent) : null
   }
 
-  async getFirstCodingAgentByType(type: CodingAgentType): Promise<CodingAgentDetail | null> {
+  async getFirstCodingAgent(workspaceId: string): Promise<CodingAgentDetail | null> {
     const codingAgent = await this.prisma.client.coding_agent.findFirst({
       where: {
-        type,
+        workspace_id: workspaceId,
       },
       orderBy: [{ created_at: 'asc' }],
     })
 
-    if (!codingAgent) {
-      return null
-    }
-
-    return this.toCodingAgentDetail(codingAgent)
+    return codingAgent ? this.toCodingAgentDetail(codingAgent) : null
   }
 
-  private async getPreferredCodingAgentByType(type: CodingAgentType): Promise<CodingAgentDetail> {
-    const defaultCodingAgent = await this.getDefaultCodingAgentByType(type)
-    if (defaultCodingAgent) {
-      return defaultCodingAgent
-    }
-
-    const firstCodingAgent = await this.getFirstCodingAgentByType(type)
-    if (firstCodingAgent) {
-      return firstCodingAgent
-    }
-
-    throw new NotFoundException(`No coding agent is configured for type "${type}".`)
-  }
-
-  async ensureIssueCodingAgentSnapshot(issueId: number, type: CodingAgentType): Promise<CodingAgentDetail> {
-    const existingSnapshot = await this.prisma.client.issue_coding_agent_snapshot.findUnique({
+  private async findCodingAgentRecord(workspaceId: string, codingAgentId: string): Promise<CodingAgentRecord | null> {
+    return this.prisma.client.coding_agent.findFirst({
       where: {
-        issue_id: issueId,
-      },
-    })
-
-    if (existingSnapshot) {
-      return this.toIssueCodingAgentSnapshot(existingSnapshot, type)
-    }
-
-    const codingAgent = await this.getPreferredCodingAgentByType(type)
-
-    try {
-      const snapshot = await this.prisma.client.issue_coding_agent_snapshot.create({
-        data: {
-          issue_id: issueId,
-          source_coding_agent_id: codingAgent.id,
-          name: codingAgent.name,
-          type: codingAgent.type,
-          settings: this.serializeSettings(codingAgent.settings),
-        },
-      })
-
-      return this.toIssueCodingAgentSnapshot(snapshot, type)
-    } catch (error) {
-      const code = typeof error === 'object' && error && 'code' in error ? (error as { code?: string }).code : null
-      if (code !== 'P2002') {
-        throw error
-      }
-
-      const snapshot = await this.prisma.client.issue_coding_agent_snapshot.findUnique({
-        where: {
-          issue_id: issueId,
-        },
-      })
-
-      if (!snapshot) {
-        throw error
-      }
-
-      return this.toIssueCodingAgentSnapshot(snapshot, type)
-    }
-  }
-
-  async getIssueCodingAgentSnapshot(issueId: number, type: CodingAgentType): Promise<CodingAgentDetail | null> {
-    const snapshot = await this.prisma.client.issue_coding_agent_snapshot.findUnique({
-      where: {
-        issue_id: issueId,
-      },
-    })
-
-    if (!snapshot) {
-      return null
-    }
-
-    return this.toIssueCodingAgentSnapshot(snapshot, type)
-  }
-
-  async clearIssueCodingAgentSnapshot(issueId: number): Promise<void> {
-    await this.prisma.client.issue_coding_agent_snapshot.deleteMany({
-      where: {
-        issue_id: issueId,
+        id: codingAgentId,
+        workspace_id: workspaceId,
       },
     })
   }
@@ -452,29 +350,6 @@ export class CodingAgentService {
     return {
       type,
       settings,
-    }
-  }
-
-  private toIssueCodingAgentSnapshot(
-    record: IssueCodingAgentSnapshotRecord,
-    expectedType: CodingAgentType,
-  ): CodingAgentDetail {
-    if (record.type !== expectedType) {
-      throw new BadRequestException(
-        `Issue ${record.issue_id} coding agent snapshot type "${record.type}" does not match expected type "${expectedType}".`,
-      )
-    }
-
-    const detail = this.parseCodingAgentDetailRecord(record.type, record.settings)
-
-    return {
-      id: record.id,
-      name: record.name,
-      type: detail.type,
-      settings: detail.settings,
-      isDefault: false,
-      createdAt: record.created_at.toISOString(),
-      updatedAt: record.updated_at.toISOString(),
     }
   }
 }

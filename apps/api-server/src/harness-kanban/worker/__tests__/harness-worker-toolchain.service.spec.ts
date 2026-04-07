@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { ConfigService } from '@nestjs/config'
-import { HarnessWorkerToolchainService } from '../harness-worker-toolchain.service'
+import { HarnessWorkerToolchainService } from '../toolchain.service'
 
 describe('HarnessWorkerToolchainService', () => {
   let configService: jest.Mocked<ConfigService>
@@ -57,7 +57,7 @@ describe('HarnessWorkerToolchainService', () => {
     })
 
     await expect(service.resolveCodexToolchainArtifact({ os: 'linux', arch: 'x64' })).rejects.toThrow(
-      'Codex toolchain archive was not found',
+      'codex toolchain archive was not found',
     )
   })
 })

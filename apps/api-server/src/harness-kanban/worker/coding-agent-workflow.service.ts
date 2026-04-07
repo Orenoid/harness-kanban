@@ -1,30 +1,34 @@
 import { z } from 'zod'
 
 import { PrismaService } from '@/database/prisma.service'
+import { CodingAgentSnapshotService } from '@/harness-kanban/coding-agent/coding-agent-snapshot.service'
 import { CommentService } from '@/issue/comment.service'
 import { IssueService } from '@/issue/issue.service'
 import { SystemBotId } from '@/user/constants/user.constants'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { CodingAgentDetail } from '@repo/shared'
 import { Comment } from '@repo/shared/issue/types'
 import { CommonPropertyOperationType, SystemPropertyId } from '@repo/shared/property/constants'
 import { Issue } from '@repo/shared/property/types'
-import { HarnessWorkerCodexRunnerService } from './harness-worker-codex-runner.service'
+import { HarnessWorkerDevpodService } from './devpod.service'
 import {
   HarnessWorkerGithubService,
   ImplementationPullRequestContext,
   ImplementationPullRequestReadiness,
   PlanPullRequestContext,
-} from './harness-worker-github.service'
+} from './github.service'
+import { HarnessWorkerCodingAgentProviderRegistry } from './providers/coding-agent-provider.registry'
 import {
   HARNESS_WORKER_IN_REVIEW_ISSUE_STATUS,
   HARNESS_WORKER_NEEDS_CLARIFICATION_ISSUE_STATUS,
   HARNESS_WORKER_NEEDS_HELP_ISSUE_STATUS,
   HARNESS_WORKER_PLAN_IN_REVIEW_ISSUE_STATUS,
-} from './harness-worker.constants'
+} from './worker.constants'
 
-const DEFAULT_CODEX_OUTPUT_REPAIR_ATTEMPTS = 2
+const DEFAULT_CODING_AGENT_OUTPUT_REPAIR_ATTEMPTS = 2
 const DEFAULT_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS = 3
+const DEFAULT_CODING_AGENT_TIMEOUT_MS = 30 * 60 * 1000
 
 const askQuestionsResultSchema = z.object({
   action: z.literal('ask_questions'),
@@ -39,7 +43,7 @@ const submitPlanResultSchema = z.object({
   pr_body: z.string().trim().min(1),
 })
 
-const codexPlanningEnvelopeSchema = z.object({
+const planningEnvelopeSchema = z.object({
   action: z.enum(['ask_questions', 'submit_plan']),
   comment: z.string(),
   branch_name: z.string(),
@@ -98,7 +102,7 @@ const submitForReviewResultSchema = z.object({
   pr_body: z.string().trim().min(1),
 })
 
-const codexImplementationEnvelopeSchema = z.object({
+const implementationEnvelopeSchema = z.object({
   action: z.enum(['request_help', 'submit_for_review']),
   comment: z.string(),
   branch_name: z.string(),
@@ -144,7 +148,7 @@ const implementationOutputJsonSchema = {
   additionalProperties: false,
 } as const
 
-type HarnessWorkerCodexWorkflowInput = {
+type HarnessWorkerCodingAgentWorkflowInput = {
   issueId: number
   workspaceId: string
   workspaceName: string
@@ -200,39 +204,59 @@ type RunImplementationInput = {
   workspaceName: string
 }
 
+type StructuredCodingAgentRunInput = {
+  issueId: number
+  outputJsonSchema: unknown
+  prompt: string
+  repoRoot: string
+  resumeSessionId?: string
+  workspaceName: string
+  workflowLabel: string
+}
+
 @Injectable()
-export class HarnessWorkerCodexWorkflowService {
-  private readonly logger = new Logger(HarnessWorkerCodexWorkflowService.name)
+export class HarnessWorkerCodingAgentWorkflowService {
+  private readonly logger = new Logger(HarnessWorkerCodingAgentWorkflowService.name)
   private readonly outputRepairAttempts: number
   private readonly implementationReviewRepairAttempts: number
+  private readonly codingAgentTimeoutMs: number
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly codingAgentSnapshotService: CodingAgentSnapshotService,
     private readonly issueService: IssueService,
     private readonly commentService: CommentService,
     private readonly githubService: HarnessWorkerGithubService,
-    private readonly codexRunnerService: HarnessWorkerCodexRunnerService,
+    private readonly codingAgentProviderRegistry: HarnessWorkerCodingAgentProviderRegistry,
+    private readonly devpodService: HarnessWorkerDevpodService,
   ) {
     this.outputRepairAttempts = this.getPositiveInteger(
-      'HARNESS_WORKER_CODEX_OUTPUT_REPAIR_ATTEMPTS',
-      DEFAULT_CODEX_OUTPUT_REPAIR_ATTEMPTS,
+      'HARNESS_WORKER_CODING_AGENT_OUTPUT_REPAIR_ATTEMPTS',
+      this.getPositiveInteger(
+        'HARNESS_WORKER_CODEX_OUTPUT_REPAIR_ATTEMPTS',
+        DEFAULT_CODING_AGENT_OUTPUT_REPAIR_ATTEMPTS,
+      ),
     )
     this.implementationReviewRepairAttempts = this.getPositiveInteger(
       'HARNESS_WORKER_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS',
       DEFAULT_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS,
     )
+    this.codingAgentTimeoutMs = this.getPositiveInteger(
+      'HARNESS_WORKER_CODING_AGENT_TIMEOUT_MS',
+      this.getPositiveInteger('HARNESS_WORKER_CODEX_TIMEOUT_MS', DEFAULT_CODING_AGENT_TIMEOUT_MS),
+    )
   }
 
-  async startPlanning(input: HarnessWorkerCodexWorkflowInput): Promise<void> {
+  async startPlanning(input: HarnessWorkerCodingAgentWorkflowInput): Promise<void> {
     try {
       // Start a fresh planning run from the latest issue state.
       const [issueDetail, repoRoot] = await Promise.all([
         this.loadIssueDetail(input.issueId),
-        this.codexRunnerService.resolveWorkspaceRoot(input.issueId),
+        this.resolveWorkspaceRoot(input.issueId),
       ])
       const prompt = this.buildPlanningPrompt(issueDetail)
-      const planningResult = await this.runPlanningCodex(
+      const planningResult = await this.runPlanningAgent(
         input.issueId,
         input.workspaceName,
         repoRoot,
@@ -252,23 +276,23 @@ export class HarnessWorkerCodexWorkflowService {
     }
   }
 
-  async resumePlanning(input: HarnessWorkerCodexWorkflowInput): Promise<void> {
+  async resumePlanning(input: HarnessWorkerCodingAgentWorkflowInput): Promise<void> {
     try {
       // Resume the existing planning thread after the user added clarification.
-      const [threadId, issueDetail, repoRoot] = await Promise.all([
-        this.codexRunnerService.loadCodexThreadId(input.issueId),
+      const [sessionId, issueDetail, repoRoot] = await Promise.all([
+        this.loadCodingAgentSessionId(input.issueId),
         this.loadIssueDetail(input.issueId),
-        this.codexRunnerService.resolveWorkspaceRoot(input.issueId),
+        this.resolveWorkspaceRoot(input.issueId),
       ])
       const prompt = this.buildResumePlanningPrompt(issueDetail, null)
-      const planningResult = await this.runPlanningCodex(
+      const planningResult = await this.runPlanningAgent(
         input.issueId,
         input.workspaceName,
         repoRoot,
         prompt,
         'resume planning',
         {
-          resumeThreadId: threadId,
+          resumeSessionId: sessionId,
         },
       )
 
@@ -284,27 +308,27 @@ export class HarnessWorkerCodexWorkflowService {
     }
   }
 
-  async requestPlanChanges(input: HarnessWorkerCodexWorkflowInput): Promise<void> {
+  async requestPlanChanges(input: HarnessWorkerCodingAgentWorkflowInput): Promise<void> {
     try {
       // Resume the planning thread with the current plan PR and review feedback.
-      const [threadId, issueDetail, repoRoot, pullRequestContext] = await Promise.all([
-        this.codexRunnerService.loadCodexThreadId(input.issueId),
+      const [sessionId, issueDetail, repoRoot, pullRequestContext] = await Promise.all([
+        this.loadCodingAgentSessionId(input.issueId),
         this.loadIssueDetail(input.issueId),
-        this.codexRunnerService.resolveWorkspaceRoot(input.issueId),
+        this.resolveWorkspaceRoot(input.issueId),
         this.githubService.getPlanPullRequestContext({
           issueId: input.issueId,
           workspaceId: input.workspaceId,
         }),
       ])
       const prompt = this.buildResumePlanningPrompt(issueDetail, pullRequestContext)
-      const planningResult = await this.runPlanningCodex(
+      const planningResult = await this.runPlanningAgent(
         input.issueId,
         input.workspaceName,
         repoRoot,
         prompt,
         'resume planning',
         {
-          resumeThreadId: threadId,
+          resumeSessionId: sessionId,
         },
       )
 
@@ -320,7 +344,7 @@ export class HarnessWorkerCodexWorkflowService {
     }
   }
 
-  async startImplementation(input: HarnessWorkerCodexWorkflowInput): Promise<void> {
+  async startImplementation(input: HarnessWorkerCodingAgentWorkflowInput): Promise<void> {
     try {
       const planPullRequestContext = await this.githubService.getPlanPullRequestContext({
         issueId: input.issueId,
@@ -342,7 +366,7 @@ export class HarnessWorkerCodexWorkflowService {
     }
   }
 
-  async resumeImplementation(input: HarnessWorkerCodexWorkflowInput): Promise<void> {
+  async resumeImplementation(input: HarnessWorkerCodingAgentWorkflowInput): Promise<void> {
     try {
       const implementationPullRequestContext = await this.githubService.findImplementationPullRequestContext({
         issueId: input.issueId,
@@ -364,7 +388,7 @@ export class HarnessWorkerCodexWorkflowService {
     }
   }
 
-  async applyRequestedCodeChanges(input: HarnessWorkerCodexWorkflowInput): Promise<void> {
+  async applyRequestedCodeChanges(input: HarnessWorkerCodingAgentWorkflowInput): Promise<void> {
     try {
       const implementationPullRequestContext = await this.githubService.getImplementationPullRequestContext({
         issueId: input.issueId,
@@ -386,137 +410,137 @@ export class HarnessWorkerCodexWorkflowService {
     }
   }
 
-  private async runPlanningCodex(
+  private async runPlanningAgent(
     issueId: number,
     workspaceName: string,
     repoRoot: string,
     prompt: string,
     workflowLabel: string,
     options?: {
-      resumeThreadId?: string
+      resumeSessionId?: string
     },
   ): Promise<PlanningResult> {
-    this.logger.log(`Starting Codex ${workflowLabel} run for issue ${issueId} in workspace ${workspaceName}`)
-    const initialResult = await this.codexRunnerService.runCodexWithSchema({
+    this.logger.log(`Starting coding agent ${workflowLabel} run for issue ${issueId} in workspace ${workspaceName}`)
+    const initialResult = await this.runCodingAgentWithSchema({
       issueId,
       outputJsonSchema: planningOutputJsonSchema,
       prompt,
       repoRoot,
-      resumeThreadId: options?.resumeThreadId,
+      resumeSessionId: options?.resumeSessionId,
       workspaceName,
       workflowLabel,
     })
-    let latestThreadId = initialResult.threadId
+    let latestSessionId = initialResult.sessionId
     let latestRawOutput = initialResult.finalMessage
     let parsedResult = this.parsePlanningResult(latestRawOutput)
 
     if (parsedResult.data) {
       this.logger.log(
-        `Codex ${workflowLabel} run for issue ${issueId} completed with action ${parsedResult.data.action}`,
+        `Coding agent ${workflowLabel} run for issue ${issueId} completed with action ${parsedResult.data.action}`,
       )
       return parsedResult.data
     }
 
     this.logger.warn(
-      `Codex returned invalid ${workflowLabel} output for issue ${issueId}; attempting repair via resume`,
+      `Coding agent returned invalid ${workflowLabel} output for issue ${issueId}; attempting repair via resume`,
     )
 
     for (let attempt = 1; attempt <= this.outputRepairAttempts; attempt += 1) {
-      const repairResult = await this.codexRunnerService.runCodexWithSchema({
+      const repairResult = await this.runCodingAgentWithSchema({
         issueId,
         outputJsonSchema: planningOutputJsonSchema,
         prompt: this.buildPlanningRepairPrompt(parsedResult.error, latestRawOutput),
         repoRoot,
-        resumeThreadId: latestThreadId,
+        resumeSessionId: latestSessionId,
         workspaceName,
         workflowLabel: `${workflowLabel} repair`,
       })
-      latestThreadId = repairResult.threadId
+      latestSessionId = repairResult.sessionId
       latestRawOutput = repairResult.finalMessage
       parsedResult = this.parsePlanningResult(latestRawOutput)
 
       if (parsedResult.data) {
         this.logger.log(
-          `Codex ${workflowLabel} repair for issue ${issueId} completed with action ${parsedResult.data.action}`,
+          `Coding agent ${workflowLabel} repair for issue ${issueId} completed with action ${parsedResult.data.action}`,
         )
         return parsedResult.data
       }
     }
 
-    throw new Error(`Codex ${workflowLabel} output is invalid: ${parsedResult.error}`)
+    throw new Error(`Coding agent ${workflowLabel} output is invalid: ${parsedResult.error}`)
   }
 
   private async runImplementationForIssue(input: RunImplementationInput): Promise<ImplementationResult> {
-    const [threadId, issueDetail, repoRoot] = await Promise.all([
-      this.codexRunnerService.loadCodexThreadId(input.issueId),
+    const [sessionId, issueDetail, repoRoot] = await Promise.all([
+      this.loadCodingAgentSessionId(input.issueId),
       this.loadIssueDetail(input.issueId),
-      this.codexRunnerService.resolveWorkspaceRoot(input.issueId),
+      this.resolveWorkspaceRoot(input.issueId),
     ])
     const prompt = this.buildImplementationPrompt(issueDetail, input)
 
-    return this.runImplementationCodex(input.issueId, input.workspaceName, repoRoot, prompt, input.mode, {
-      resumeThreadId: threadId,
+    return this.runImplementationAgent(input.issueId, input.workspaceName, repoRoot, prompt, input.mode, {
+      resumeSessionId: sessionId,
     })
   }
 
-  private async runImplementationCodex(
+  private async runImplementationAgent(
     issueId: number,
     workspaceName: string,
     repoRoot: string,
     prompt: string,
     workflowLabel: string,
     options?: {
-      resumeThreadId?: string
+      resumeSessionId?: string
     },
   ): Promise<ImplementationResult> {
-    this.logger.log(`Starting Codex ${workflowLabel} run for issue ${issueId} in workspace ${workspaceName}`)
-    const initialResult = await this.codexRunnerService.runCodexWithSchema({
+    this.logger.log(`Starting coding agent ${workflowLabel} run for issue ${issueId} in workspace ${workspaceName}`)
+    const initialResult = await this.runCodingAgentWithSchema({
       issueId,
       outputJsonSchema: implementationOutputJsonSchema,
       prompt,
       repoRoot,
-      resumeThreadId: options?.resumeThreadId,
+      resumeSessionId: options?.resumeSessionId,
       workspaceName,
       workflowLabel,
     })
-    let latestThreadId = initialResult.threadId
+    let latestSessionId = initialResult.sessionId
     let latestRawOutput = initialResult.finalMessage
     let parsedResult = this.parseImplementationResult(latestRawOutput)
 
     if (parsedResult.data) {
       this.logger.log(
-        `Codex ${workflowLabel} run for issue ${issueId} completed with action ${parsedResult.data.action}`,
+        `Coding agent ${workflowLabel} run for issue ${issueId} completed with action ${parsedResult.data.action}`,
       )
       return parsedResult.data
     }
 
     this.logger.warn(
-      `Codex returned invalid ${workflowLabel} output for issue ${issueId}; attempting repair via resume`,
+      `Coding agent returned invalid ${workflowLabel} output for issue ${issueId}; attempting repair via resume`,
     )
 
     for (let attempt = 1; attempt <= this.outputRepairAttempts; attempt += 1) {
-      const repairResult = await this.codexRunnerService.runCodexWithSchema({
+      const repairResult = await this.runCodingAgentWithSchema({
         issueId,
         outputJsonSchema: implementationOutputJsonSchema,
         prompt: this.buildImplementationRepairPrompt(parsedResult.error, latestRawOutput),
         repoRoot,
-        resumeThreadId: latestThreadId,
+        resumeSessionId: latestSessionId,
         workspaceName,
         workflowLabel: `${workflowLabel} repair`,
       })
-      latestThreadId = repairResult.threadId
+      latestSessionId = repairResult.sessionId
       latestRawOutput = repairResult.finalMessage
       parsedResult = this.parseImplementationResult(latestRawOutput)
 
       if (parsedResult.data) {
         this.logger.log(
-          `Codex ${workflowLabel} repair for issue ${issueId} completed with action ${parsedResult.data.action}`,
+          `Coding agent ${workflowLabel} repair for issue ${issueId} completed with action ${parsedResult.data.action}`,
         )
         return parsedResult.data
       }
     }
 
-    throw new Error(`Codex ${workflowLabel} output is invalid: ${parsedResult.error}`)
+    throw new Error(`Coding agent ${workflowLabel} output is invalid: ${parsedResult.error}`)
   }
 
   private async loadIssueDetail(issueId: number): Promise<IssueDetail> {
@@ -547,6 +571,79 @@ export class HarnessWorkerCodexWorkflowService {
       projectId: this.getPropertyValue(issue, SystemPropertyId.PROJECT),
       comments: this.serializeComments(comments),
     }
+  }
+
+  private async loadCodingAgentSessionId(issueId: number): Promise<string> {
+    const executionState = await this.codingAgentSnapshotService.getIssueCodingAgentExecutionState(issueId)
+    const sessionId = executionState?.sessionId?.trim()
+
+    if (!sessionId) {
+      throw new Error(`Coding agent session id is not available for issue ${issueId}`)
+    }
+
+    return sessionId
+  }
+
+  private async runCodingAgentWithSchema(
+    input: StructuredCodingAgentRunInput,
+  ): Promise<{ finalMessage: string; sessionId: string }> {
+    const codingAgent = await this.loadIssueCodingAgentSnapshot(input.issueId)
+    const provider = this.codingAgentProviderRegistry.getProvider(codingAgent.type)
+    const remoteUser = await this.devpodService.resolveWorkspaceRemoteUser(input.workspaceName)
+    const result = await provider.runWithSchema({
+      outputJsonSchema: input.outputJsonSchema,
+      prompt: input.prompt,
+      remoteUser,
+      repoRoot: input.repoRoot,
+      resumeSessionId: input.resumeSessionId,
+      settings: codingAgent.settings,
+      timeoutMs: this.codingAgentTimeoutMs,
+      workflowLabel: input.workflowLabel,
+      workspaceName: input.workspaceName,
+      quoteShellArg: value => this.quoteShellArg(value),
+      runWorkspaceCommand: (command, options) =>
+        this.devpodService.runWorkspaceCommand(input.workspaceName, command, options),
+    })
+
+    await this.codingAgentSnapshotService.updateIssueCodingAgentExecutionState(input.issueId, {
+      sessionId: result.sessionId,
+    })
+
+    return {
+      finalMessage: result.finalMessage,
+      sessionId: result.sessionId,
+    }
+  }
+
+  private async loadIssueCodingAgentSnapshot(issueId: number): Promise<CodingAgentDetail> {
+    const codingAgent = await this.codingAgentSnapshotService.getIssueCodingAgentSnapshot(issueId)
+    if (!codingAgent) {
+      throw new Error('No coding agent snapshot is available for this issue.')
+    }
+
+    return codingAgent
+  }
+
+  private async resolveWorkspaceRoot(issueId: number): Promise<string> {
+    const worker = await this.prisma.client.harness_worker.findFirst({
+      where: {
+        issue_id: issueId,
+      },
+      select: {
+        devpod_metadata: true,
+      },
+    })
+
+    const metadata = this.asRecord(worker?.devpod_metadata)
+    const result = this.asRecord(metadata?.result)
+    const substitution = this.asRecord(result?.substitution)
+    const containerWorkspaceFolder = substitution?.containerWorkspaceFolder
+
+    if (typeof containerWorkspaceFolder !== 'string' || containerWorkspaceFolder.trim().length === 0) {
+      throw new Error(`DevPod workspace root is not available for issue ${issueId}`)
+    }
+
+    return containerWorkspaceFolder.trim()
   }
 
   private buildPlanningPrompt(issueDetail: IssueDetail): string {
@@ -622,7 +719,7 @@ export class HarnessWorkerCodexWorkflowService {
       '',
       ...(pullRequestJson ? ['Current technical plan pull request context (JSON):', pullRequestJson, ''] : []),
       'Task instructions:',
-      '1. This run resumes the existing Codex conversation for the issue. Use the prior planning context unless it conflicts with the latest issue details or review feedback.',
+      '1. This run resumes the existing coding agent conversation for the issue. Use the prior planning context unless it conflicts with the latest issue details or review feedback.',
       pullRequestContext
         ? '2. Inspect the codebase, the latest issue details, and the GitHub pull request feedback. Follow repository guidance files such as AGENTS.md or CLAUDE.md.'
         : '2. Inspect the codebase, the latest issue details, and the issue comments. Follow repository guidance files such as AGENTS.md or CLAUDE.md.',
@@ -657,7 +754,7 @@ export class HarnessWorkerCodexWorkflowService {
       input.implementationPullRequestContext?.pullRequest.headBranch ??
       input.planPullRequestContext?.pullRequest.headBranch
     const taskInstructions = [
-      '1. This run resumes the existing Codex conversation for the issue. Use the prior implementation context unless it conflicts with the latest issue details.',
+      '1. This run resumes the existing coding agent conversation for the issue. Use the prior implementation context unless it conflicts with the latest issue details.',
       this.getSecondInstructionForMode(input.mode),
       existingBranch
         ? `3. Continue working on the current implementation branch ${existingBranch}. Reuse it unless the branch is unavailable.`
@@ -745,7 +842,7 @@ export class HarnessWorkerCodexWorkflowService {
       }
     }
 
-    const envelopeResult = codexPlanningEnvelopeSchema.safeParse(parsed)
+    const envelopeResult = planningEnvelopeSchema.safeParse(parsed)
     if (!envelopeResult.success) {
       return {
         data: null,
@@ -753,11 +850,11 @@ export class HarnessWorkerCodexWorkflowService {
       }
     }
 
-    const normalizedResult = this.normalizeCodexPlanningEnvelope(envelopeResult.data)
+    const normalizedResult = this.normalizePlanningEnvelope(envelopeResult.data)
     if (!normalizedResult) {
       return {
         data: null,
-        error: 'Structured Codex response did not include the required non-empty field for the selected action.',
+        error: 'Structured coding agent response did not include the required non-empty field for the selected action.',
       }
     }
 
@@ -789,7 +886,7 @@ export class HarnessWorkerCodexWorkflowService {
       }
     }
 
-    const envelopeResult = codexImplementationEnvelopeSchema.safeParse(parsed)
+    const envelopeResult = implementationEnvelopeSchema.safeParse(parsed)
     if (!envelopeResult.success) {
       return {
         data: null,
@@ -797,11 +894,11 @@ export class HarnessWorkerCodexWorkflowService {
       }
     }
 
-    const normalizedResult = this.normalizeCodexImplementationEnvelope(envelopeResult.data)
+    const normalizedResult = this.normalizeImplementationEnvelope(envelopeResult.data)
     if (!normalizedResult) {
       return {
         data: null,
-        error: 'Structured Codex response did not include the required non-empty field for the selected action.',
+        error: 'Structured coding agent response did not include the required non-empty field for the selected action.',
       }
     }
 
@@ -811,7 +908,7 @@ export class HarnessWorkerCodexWorkflowService {
     }
   }
 
-  private normalizeCodexPlanningEnvelope(payload: z.infer<typeof codexPlanningEnvelopeSchema>): PlanningResult | null {
+  private normalizePlanningEnvelope(payload: z.infer<typeof planningEnvelopeSchema>): PlanningResult | null {
     const comment = payload.comment.trim()
     const branchName = payload.branch_name.trim()
     const pullRequestTitle = payload.pr_title.trim()
@@ -832,8 +929,8 @@ export class HarnessWorkerCodexWorkflowService {
       : null
   }
 
-  private normalizeCodexImplementationEnvelope(
-    payload: z.infer<typeof codexImplementationEnvelopeSchema>,
+  private normalizeImplementationEnvelope(
+    payload: z.infer<typeof implementationEnvelopeSchema>,
   ): ImplementationResult | null {
     const comment = payload.comment.trim()
     const branchName = payload.branch_name.trim()
@@ -933,7 +1030,7 @@ export class HarnessWorkerCodexWorkflowService {
   }
 
   private async handleImplementationResult(
-    input: HarnessWorkerCodexWorkflowInput,
+    input: HarnessWorkerCodingAgentWorkflowInput,
     implementationResult: ImplementationResult,
   ): Promise<void> {
     const summary = await this.loadIssueSummary(input.issueId)
@@ -952,7 +1049,7 @@ export class HarnessWorkerCodexWorkflowService {
   }
 
   private async finalizeImplementationReviewSubmission(
-    input: HarnessWorkerCodexWorkflowInput,
+    input: HarnessWorkerCodingAgentWorkflowInput,
     summary: { createdBy: string },
     initialResult: Extract<ImplementationResult, { action: 'submit_for_review' }>,
   ): Promise<void> {
@@ -1000,7 +1097,7 @@ export class HarnessWorkerCodexWorkflowService {
         )
       }
 
-      // Refresh PR context before asking Codex to repair the readiness failure.
+      // Refresh PR context before asking coding agent to repair the readiness failure.
       const latestImplementationContext = await this.githubService.getImplementationPullRequestContext({
         branchName: readiness.context.pullRequest.headBranch,
         issueId: input.issueId,
@@ -1249,5 +1346,17 @@ export class HarnessWorkerCodexWorkflowService {
           : Number.NaN
 
     return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null
+    }
+
+    return value as Record<string, unknown>
+  }
+
+  private quoteShellArg(value: string): string {
+    return `'${value.replace(/'/g, `'\"'\"'`)}'`
   }
 }

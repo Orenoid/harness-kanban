@@ -1,7 +1,7 @@
 import { AuthModule } from '@/auth/auth.module'
-import { CodingAgentModule } from '@/coding-agent/coding-agent.module'
 import { DatabaseModule } from '@/database/database.module'
 import { GithubModule } from '@/github/github.module'
+import { CodingAgentModule } from '@/harness-kanban/coding-agent/coding-agent.module'
 import { HarnessKanbanModule } from '@/harness-kanban/harness-kanban.module'
 import { HealthModule } from '@/health/health.module'
 import { IssueModule } from '@/issue/issue.module'

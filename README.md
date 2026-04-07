@@ -21,8 +21,6 @@ Harness Kanban is a cloud-based kanban tool for managing fully containerized cod
 - **👤 Human in the Loop**: Humans and agents alternate responsibility for different lifecycle stages of an issue.
 - **🔔 Async Workflow**: Automatically sends notifications when an issue requires your attention.
 
-Currently, Harness Kanban supports Codex only. Claude Code support is coming very soon.
-
 ## Prerequisites
 
 - Git
@@ -54,6 +52,5 @@ Theoretically, you can deploy the worker anywhere that can connect to the projec
 
 ## Future Plans
 
-1. Support more coding agents.
 2. Implement more dynamic scheduling logic so that when an issue is blocked by a human step, such as waiting for review, workers can switch to other available issues.
 3. Build a Linear adapter and detach agent worker scheduling from the built-in kanban so Harness Kanban can integrate with more existing issue management systems.
