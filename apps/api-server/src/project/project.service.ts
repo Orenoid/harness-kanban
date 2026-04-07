@@ -7,8 +7,10 @@ import {
   CreateProjectInput,
   normalizeProjectEnvConfig,
   normalizeProjectMcpConfig,
+  normalizeProjectValidationCommands,
   parseProjectEnvConfig,
   parseProjectMcpConfig,
+  parseProjectValidationCommands,
   ProjectDetail,
   ProjectEnvConfig,
   ProjectMcpConfig,
@@ -84,6 +86,7 @@ export class ProjectService {
         repo_base_branch: normalizedInput.repoBaseBranch,
         check_ci_cd: normalizedInput.checkCiCd,
         preview_commands: normalizedInput.previewCommands,
+        validation_commands: normalizedInput.validationCommands,
         mcp_config: this.serializeProjectMcpConfig(normalizedInput.mcpConfig),
         env_config: this.serializeProjectEnvConfig(normalizedInput.envConfig),
         created_by: userId,
@@ -151,6 +154,7 @@ export class ProjectService {
     repo_base_branch: string
     check_ci_cd: boolean
     preview_commands: unknown
+    validation_commands?: unknown
     created_at: Date
     updated_at: Date
   }): ProjectSummary {
@@ -161,6 +165,7 @@ export class ProjectService {
       repoBaseBranch: project.repo_base_branch,
       checkCiCd: project.check_ci_cd,
       previewCommands: this.parsePreviewCommands(project.preview_commands),
+      validationCommands: parseProjectValidationCommands(project.validation_commands),
       createdAt: project.created_at.toISOString(),
       updatedAt: project.updated_at.toISOString(),
     }
@@ -174,6 +179,7 @@ export class ProjectService {
     repo_base_branch: string
     check_ci_cd: boolean
     preview_commands: unknown
+    validation_commands?: unknown
     mcp_config: unknown
     env_config: unknown
     created_by: string
@@ -195,6 +201,7 @@ export class ProjectService {
     repoBaseBranch: string
     checkCiCd: boolean
     previewCommands: string[]
+    validationCommands: string[]
     mcpConfig: ProjectMcpConfig | null
     envConfig: ProjectEnvConfig | null
   } {
@@ -204,6 +211,7 @@ export class ProjectService {
       repoBaseBranch: this.normalizeBranch(input.repoBaseBranch),
       checkCiCd: Boolean(input.checkCiCd),
       previewCommands: this.normalizePreviewCommands(input.previewCommands),
+      validationCommands: this.normalizeValidationCommands(input.validationCommands),
       mcpConfig: normalizeProjectMcpConfig(input.mcpConfig),
       envConfig: normalizeProjectEnvConfig(input.envConfig),
     }
@@ -213,6 +221,7 @@ export class ProjectService {
     name?: string
     check_ci_cd?: boolean
     preview_commands?: string[]
+    validation_commands?: string[] | Prisma.NullableJsonNullValueInput
     mcp_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
     env_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
   } {
@@ -220,6 +229,7 @@ export class ProjectService {
       name?: string
       check_ci_cd?: boolean
       preview_commands?: string[]
+      validation_commands?: string[] | Prisma.NullableJsonNullValueInput
       mcp_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
       env_config?: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue
     } = {}
@@ -232,6 +242,10 @@ export class ProjectService {
     }
     if ('previewCommands' in input && input.previewCommands !== undefined) {
       data.preview_commands = this.normalizePreviewCommands(input.previewCommands)
+    }
+    if ('validationCommands' in input) {
+      const commands = this.normalizeValidationCommands(input.validationCommands ?? null)
+      data.validation_commands = commands.length > 0 ? commands : Prisma.DbNull
     }
     if ('mcpConfig' in input) {
       data.mcp_config = this.serializeProjectMcpConfig(input.mcpConfig ?? null)
@@ -307,6 +321,23 @@ export class ProjectService {
     }
 
     return value.filter((item): item is string => typeof item === 'string')
+  }
+
+  private normalizeValidationCommands(raw: string[] | null | undefined): string[] {
+    if (raw === null || raw === undefined) {
+      return []
+    }
+
+    if (!Array.isArray(raw)) {
+      throw new BadRequestException('Validation commands must be an array of strings.')
+    }
+
+    const normalized = normalizeProjectValidationCommands(raw)
+    if (normalized.length !== raw.length) {
+      throw new BadRequestException('Validation commands must be non-empty strings.')
+    }
+
+    return normalized
   }
 
   private serializeProjectMcpConfig(

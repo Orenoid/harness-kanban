@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 const projectMcpServerNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const projectEnvVarNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
+const projectCommandMaxLength = 2000
 
 export const projectMcpStreamableHttpServerSchema = z
   .object({
@@ -78,6 +79,30 @@ export const projectEnvConfigSchema = z.record(z.string(), z.string()).superRefi
 })
 
 export type ProjectEnvConfig = z.infer<typeof projectEnvConfigSchema>
+
+export const projectValidationCommandsSchema = z.array(z.string()).superRefine((commands, ctx) => {
+  commands.forEach((command, index) => {
+    const normalized = command.trim()
+    if (!normalized) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `Validation command at index ${index} must not be empty.`,
+        path: [index],
+      })
+      return
+    }
+
+    if (normalized.length > projectCommandMaxLength) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `Validation command at index ${index} must be at most ${projectCommandMaxLength} characters.`,
+        path: [index],
+      })
+    }
+  })
+})
+
+export type ProjectValidationCommands = z.infer<typeof projectValidationCommandsSchema>
 
 export const normalizeProjectMcpConfig = (config: ProjectMcpConfig | null | undefined): ProjectMcpConfig | null => {
   if (!config) {
@@ -164,6 +189,34 @@ export const parseProjectEnvConfig = (value: unknown): ProjectEnvConfig | null =
   return normalizeProjectEnvConfig(parsed.data)
 }
 
+export const normalizeProjectValidationCommands = (
+  commands: ProjectValidationCommands | null | undefined,
+): ProjectValidationCommands => {
+  if (!commands) {
+    return []
+  }
+
+  const parsed = projectValidationCommandsSchema.safeParse(commands)
+  if (!parsed.success) {
+    return []
+  }
+
+  return parsed.data.map(command => command.trim())
+}
+
+export const parseProjectValidationCommands = (value: unknown): ProjectValidationCommands => {
+  if (value === null || value === undefined) {
+    return []
+  }
+
+  const parsed = projectValidationCommandsSchema.safeParse(value)
+  if (!parsed.success) {
+    return []
+  }
+
+  return normalizeProjectValidationCommands(parsed.data)
+}
+
 export interface ProjectSummary {
   id: string
   name: string
@@ -171,6 +224,7 @@ export interface ProjectSummary {
   repoBaseBranch: string
   checkCiCd: boolean
   previewCommands: string[]
+  validationCommands?: string[]
   createdAt: string
   updatedAt: string
 }
@@ -188,6 +242,7 @@ export interface CreateProjectInput {
   repoBaseBranch: string
   checkCiCd?: boolean
   previewCommands?: string[]
+  validationCommands?: string[]
   mcpConfig?: ProjectMcpConfig
   envConfig?: ProjectEnvConfig
 }
@@ -196,6 +251,7 @@ export interface UpdateProjectInput {
   name?: string
   checkCiCd?: boolean
   previewCommands?: string[]
+  validationCommands?: string[] | null
   mcpConfig?: ProjectMcpConfig | null
   envConfig?: ProjectEnvConfig | null
 }

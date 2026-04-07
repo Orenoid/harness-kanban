@@ -55,6 +55,7 @@ describe('ProjectService', () => {
       repo_base_branch: 'main',
       check_ci_cd: true,
       preview_commands: ['pnpm install', 'pnpm dev'],
+      validation_commands: ['pnpm type-check', 'pnpm test'],
       mcp_config: mcpConfig,
       env_config: {
         API_BASE_URL: 'https://api.example.com',
@@ -71,6 +72,7 @@ describe('ProjectService', () => {
       repoBaseBranch: '  main ',
       checkCiCd: true,
       previewCommands: [' pnpm install ', 'pnpm dev  '],
+      validationCommands: [' pnpm type-check ', 'pnpm test  '],
       mcpConfig,
       envConfig,
     })
@@ -83,6 +85,7 @@ describe('ProjectService', () => {
         repo_base_branch: 'main',
         check_ci_cd: true,
         preview_commands: ['pnpm install', 'pnpm dev'],
+        validation_commands: ['pnpm type-check', 'pnpm test'],
         mcp_config: mcpConfig,
         env_config: {
           API_BASE_URL: 'https://api.example.com',
@@ -118,6 +121,20 @@ describe('ProjectService', () => {
     ).rejects.toThrow(new ForbiddenException('No access to create projects'))
   })
 
+  it('rejects empty validation commands', async () => {
+    authService.checkUserPermission.mockResolvedValue(true)
+    ;(prismaService.client.project.findFirst as jest.Mock).mockResolvedValue(null)
+
+    await expect(
+      service.createProject(workspaceId, userId, {
+        name: 'Payments API',
+        githubRepoUrl: 'https://github.com/harness-kanban/payments-api',
+        repoBaseBranch: 'main',
+        validationCommands: ['pnpm test', '  '],
+      }),
+    ).rejects.toThrow(new BadRequestException('Validation commands must be non-empty strings.'))
+  })
+
   it('updates only mutable fields', async () => {
     authService.checkUserPermission.mockResolvedValue(true)
     ;(prismaService.client.project.findFirst as jest.Mock).mockResolvedValue({
@@ -133,6 +150,7 @@ describe('ProjectService', () => {
       repo_base_branch: 'main',
       check_ci_cd: false,
       preview_commands: ['pnpm dev'],
+      validation_commands: ['pnpm type-check'],
       mcp_config: {
         'repo-tools': {
           type: 'stdio',
@@ -156,6 +174,7 @@ describe('ProjectService', () => {
       name: '  Payments API v2 ',
       checkCiCd: false,
       previewCommands: [' pnpm dev '],
+      validationCommands: [' pnpm type-check '],
       mcpConfig: {
         'repo-tools': {
           type: 'stdio',
@@ -180,6 +199,7 @@ describe('ProjectService', () => {
         name: 'Payments API v2',
         check_ci_cd: false,
         preview_commands: ['pnpm dev'],
+        validation_commands: ['pnpm type-check'],
         mcp_config: {
           'repo-tools': {
             type: 'stdio',

@@ -9,6 +9,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { CodingAgentDetail } from '@repo/shared'
 import { Comment } from '@repo/shared/issue/types'
+import { parseProjectValidationCommands } from '@repo/shared/project/types'
 import { CommonPropertyOperationType, SystemPropertyId } from '@repo/shared/property/constants'
 import { Issue } from '@repo/shared/property/types'
 import { HarnessWorkerDevpodService } from './devpod.service'
@@ -28,6 +29,7 @@ import {
 
 const DEFAULT_CODING_AGENT_OUTPUT_REPAIR_ATTEMPTS = 2
 const DEFAULT_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS = 3
+const DEFAULT_VALIDATION_REPAIR_ATTEMPTS = 30
 const DEFAULT_CODING_AGENT_TIMEOUT_MS = 30 * 60 * 1000
 
 const askQuestionsResultSchema = z.object({
@@ -193,6 +195,7 @@ type HarnessWorkerImplementationMode =
   | 'approve_plan'
   | 'resume_implementation'
   | 'requested_code_changes'
+  | 'repair_validation_failure'
   | 'repair_review_readiness'
 
 type RunImplementationInput = {
@@ -201,6 +204,7 @@ type RunImplementationInput = {
   mode: HarnessWorkerImplementationMode
   planPullRequestContext?: PlanPullRequestContext | null
   readinessFailure?: ImplementationPullRequestReadiness | null
+  validationFailure?: ProjectValidationFailureReport | null
   workspaceName: string
 }
 
@@ -214,11 +218,23 @@ type StructuredCodingAgentRunInput = {
   workflowLabel: string
 }
 
+type ProjectValidationFailureReport = {
+  failedCommands: string[]
+  state: 'failed'
+}
+
+type ProjectValidationReport =
+  | {
+      state: 'passed' | 'skipped'
+    }
+  | ProjectValidationFailureReport
+
 @Injectable()
 export class HarnessWorkerCodingAgentWorkflowService {
   private readonly logger = new Logger(HarnessWorkerCodingAgentWorkflowService.name)
   private readonly outputRepairAttempts: number
   private readonly implementationReviewRepairAttempts: number
+  private readonly validationRepairAttempts: number
   private readonly codingAgentTimeoutMs: number
 
   constructor(
@@ -241,6 +257,10 @@ export class HarnessWorkerCodingAgentWorkflowService {
     this.implementationReviewRepairAttempts = this.getPositiveInteger(
       'HARNESS_WORKER_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS',
       DEFAULT_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS,
+    )
+    this.validationRepairAttempts = this.getPositiveInteger(
+      'HARNESS_WORKER_VALIDATION_REPAIR_ATTEMPTS',
+      DEFAULT_VALIDATION_REPAIR_ATTEMPTS,
     )
     this.codingAgentTimeoutMs = this.getPositiveInteger(
       'HARNESS_WORKER_CODING_AGENT_TIMEOUT_MS',
@@ -750,6 +770,7 @@ export class HarnessWorkerCodingAgentWorkflowService {
       ? JSON.stringify(input.implementationPullRequestContext, null, 2)
       : null
     const readinessFailureJson = input.readinessFailure ? JSON.stringify(input.readinessFailure, null, 2) : null
+    const validationFailureJson = input.validationFailure ? JSON.stringify(input.validationFailure, null, 2) : null
     const existingBranch =
       input.implementationPullRequestContext?.pullRequest.headBranch ??
       input.planPullRequestContext?.pullRequest.headBranch
@@ -791,6 +812,7 @@ export class HarnessWorkerCodingAgentWorkflowService {
         ? ['Current implementation pull request context (JSON):', implementationPullRequestJson, '']
         : []),
       ...(readinessFailureJson ? ['Latest automated PR readiness report (JSON):', readinessFailureJson, ''] : []),
+      ...(validationFailureJson ? ['Latest automated validation report (JSON):', validationFailureJson, ''] : []),
       'Task instructions:',
       ...taskInstructions,
     ].join('\n')
@@ -960,6 +982,8 @@ export class HarnessWorkerCodingAgentWorkflowService {
         return 'You are a senior engineer working inside a dev container. Resume implementation after the user responded to a previous blocker.'
       case 'requested_code_changes':
         return 'You are a senior engineer working inside a dev container. Revise the implementation after code review feedback.'
+      case 'repair_validation_failure':
+        return 'You are a senior engineer working inside a dev container. Your previous submit_for_review attempt failed project validation commands that you must fix now.'
       case 'repair_review_readiness':
         return 'You are a senior engineer working inside a dev container. Your previous submit_for_review attempt is not yet reviewable because automated pull request readiness checks found problems that you must fix now.'
     }
@@ -973,6 +997,8 @@ export class HarnessWorkerCodingAgentWorkflowService {
         return '2. Follow repository guidance files such as AGENTS.md or CLAUDE.md. Inspect the latest issue comments to understand how the user answered the previous blocker, then continue implementation.'
       case 'requested_code_changes':
         return '2. Follow repository guidance files such as AGENTS.md or CLAUDE.md. Inspect the implementation pull request feedback and adjust the code so the review comments are addressed.'
+      case 'repair_validation_failure':
+        return '2. Follow repository guidance files such as AGENTS.md or CLAUDE.md. Inspect the automated validation report, fix the project validation command failures, and do not return submit_for_review again until those commands should pass.'
       case 'repair_review_readiness':
         return '2. Follow repository guidance files such as AGENTS.md or CLAUDE.md. Inspect the automated pull request readiness report, fix the failing checks or mergeability problems, and do not return submit_for_review again until the pull request should be green and mergeable.'
     }
@@ -1054,8 +1080,10 @@ export class HarnessWorkerCodingAgentWorkflowService {
     initialResult: Extract<ImplementationResult, { action: 'submit_for_review' }>,
   ): Promise<void> {
     let currentResult = initialResult
+    let validationRepairCount = 0
+    let reviewRepairCount = 0
 
-    for (let attempt = 0; attempt <= this.implementationReviewRepairAttempts; attempt += 1) {
+    while (true) {
       // Keep the PR in sync with the current branch and wait until GitHub can evaluate review readiness.
       const pullRequest = await this.githubService.ensureReadyForReviewPullRequest({
         issueId: input.issueId,
@@ -1064,6 +1092,42 @@ export class HarnessWorkerCodingAgentWorkflowService {
         pullRequestTitle: currentResult.pr_title,
         pullRequestBody: currentResult.pr_body,
       })
+      const validation = await this.runProjectValidationCommands(input.issueId, input.workspaceId, input.workspaceName)
+
+      if (validation.state === 'failed') {
+        if (validationRepairCount >= this.validationRepairAttempts) {
+          throw new Error(
+            `Project validation commands for issue ${input.issueId} are still failing after ${this.validationRepairAttempts} repair attempts: ${validation.failedCommands.join(', ')}`,
+          )
+        }
+
+        validationRepairCount += 1
+        const latestImplementationContext = await this.githubService.getImplementationPullRequestContext({
+          branchName: currentResult.branch_name,
+          issueId: input.issueId,
+          workspaceId: input.workspaceId,
+        })
+        const repairResult = await this.runImplementationForIssue({
+          implementationPullRequestContext: latestImplementationContext,
+          issueId: input.issueId,
+          mode: 'repair_validation_failure',
+          validationFailure: validation,
+          workspaceName: input.workspaceName,
+        })
+        if (repairResult.action === 'request_help') {
+          await this.moveImplementationBackToHuman(
+            input.issueId,
+            input.workspaceId,
+            summary.createdBy,
+            repairResult.comment,
+          )
+          return
+        }
+
+        currentResult = repairResult
+        continue
+      }
+
       const readiness = await this.githubService.waitForImplementationPullRequestReadiness({
         issueId: input.issueId,
         workspaceId: input.workspaceId,
@@ -1091,12 +1155,13 @@ export class HarnessWorkerCodingAgentWorkflowService {
         return
       }
 
-      if (attempt === this.implementationReviewRepairAttempts) {
+      if (reviewRepairCount >= this.implementationReviewRepairAttempts) {
         throw new Error(
           `Pull request for issue ${input.issueId} is still not ready after ${this.implementationReviewRepairAttempts} repair attempts: ${readiness.summary}`,
         )
       }
 
+      reviewRepairCount += 1
       // Refresh PR context before asking coding agent to repair the readiness failure.
       const latestImplementationContext = await this.githubService.getImplementationPullRequestContext({
         branchName: readiness.context.pullRequest.headBranch,
@@ -1125,6 +1190,81 @@ export class HarnessWorkerCodingAgentWorkflowService {
 
       currentResult = repairResult
     }
+  }
+
+  private async runProjectValidationCommands(
+    issueId: number,
+    workspaceId: string,
+    workspaceName: string,
+  ): Promise<ProjectValidationReport> {
+    const [repoRoot, commands] = await Promise.all([
+      this.resolveWorkspaceRoot(issueId),
+      this.loadIssueProjectValidationCommands(issueId, workspaceId),
+    ])
+
+    if (commands.length === 0) {
+      return {
+        state: 'skipped',
+      }
+    }
+
+    const failedCommands: string[] = []
+    for (const command of commands) {
+      try {
+        await this.devpodService.runWorkspaceCommand(
+          workspaceName,
+          `cd ${this.quoteShellArg(repoRoot)} && ${command}`,
+          {
+            label: `project validation: ${this.truncate(command, 120)}`,
+            maxBuffer: 20 * 1024 * 1024,
+          },
+        )
+      } catch {
+        failedCommands.push(command)
+      }
+    }
+
+    if (failedCommands.length > 0) {
+      return {
+        state: 'failed',
+        failedCommands,
+      }
+    }
+
+    return {
+      state: 'passed',
+    }
+  }
+
+  private async loadIssueProjectValidationCommands(issueId: number, workspaceId: string): Promise<string[]> {
+    const projectBinding = await this.prisma.client.property_single_value.findFirst({
+      where: {
+        issue_id: issueId,
+        property_id: SystemPropertyId.PROJECT,
+        deleted_at: null,
+        value: { not: null },
+      },
+      select: {
+        value: true,
+      },
+    })
+    const projectId = projectBinding?.value?.trim()
+    if (!projectId) {
+      return []
+    }
+
+    const project = await this.prisma.client.project.findFirst({
+      where: {
+        id: projectId,
+        workspace_id: workspaceId,
+        deleted_at: null,
+      },
+      select: {
+        validation_commands: true,
+      },
+    })
+
+    return parseProjectValidationCommands(project?.validation_commands)
   }
 
   private buildPullRequestIssueComment(pullRequestUrl: string, comment: string): string {

@@ -4,7 +4,11 @@ import { AuthWorkspaceId } from '@/auth/decorators/organization.decorator'
 import { makeSuccessResponse } from '@/common/responses/api-response'
 import { zodParse } from '@/common/zod/zod-parse'
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common'
-import { projectEnvConfigSchema, projectMcpConfigSchema } from '@repo/shared/project/types'
+import {
+  projectEnvConfigSchema,
+  projectMcpConfigSchema,
+  projectValidationCommandsSchema,
+} from '@repo/shared/project/types'
 import { Session, UserSession } from '@thallesp/nestjs-better-auth'
 import { ProjectService } from './project.service'
 import {
@@ -17,6 +21,7 @@ import {
 } from './types/project.types'
 
 const PreviewCommandsSchema = z.array(z.string()).optional()
+const ValidationCommandsSchema = projectValidationCommandsSchema.optional()
 
 const CreateProjectSchema = z.object({
   project: z
@@ -26,6 +31,7 @@ const CreateProjectSchema = z.object({
       repoBaseBranch: z.string(),
       checkCiCd: z.boolean().optional(),
       previewCommands: PreviewCommandsSchema,
+      validationCommands: ValidationCommandsSchema,
       mcpConfig: projectMcpConfigSchema.optional(),
       envConfig: projectEnvConfigSchema.optional(),
     })
@@ -38,6 +44,7 @@ const UpdateProjectSchema = z.object({
       name: z.string().optional(),
       checkCiCd: z.boolean().optional(),
       previewCommands: PreviewCommandsSchema,
+      validationCommands: projectValidationCommandsSchema.nullable().optional(),
       mcpConfig: projectMcpConfigSchema.nullable().optional(),
       envConfig: projectEnvConfigSchema.nullable().optional(),
     })

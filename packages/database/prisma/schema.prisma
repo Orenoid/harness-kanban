@@ -138,6 +138,7 @@ model project {
   repo_base_branch String
   check_ci_cd      Boolean   @default(false)
   preview_commands Json?
+  validation_commands Json?
   mcp_config       Json?
   env_config       Json?
   created_by       String

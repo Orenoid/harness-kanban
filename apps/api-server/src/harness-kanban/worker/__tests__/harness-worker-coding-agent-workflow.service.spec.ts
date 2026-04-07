@@ -47,6 +47,11 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
             },
           }),
         },
+        project: {
+          findFirst: jest.fn().mockResolvedValue({
+            validation_commands: null,
+          }),
+        },
       },
     } as unknown as jest.Mocked<PrismaService>
 
@@ -380,6 +385,56 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
         ],
       },
     )
+  })
+
+  it('runs all project validation commands and asks the agent to repair failed commands', async () => {
+    ;(prismaService.client.project.findFirst as jest.Mock).mockResolvedValue({
+      validation_commands: ['pnpm type-check', 'pnpm test', 'pnpm build'],
+    })
+    provider.runWithSchema
+      .mockResolvedValueOnce({
+        sessionId: 'session-existing',
+        finalMessage:
+          '{"action":"submit_for_review","comment":"Please review.","branch_name":"code-bot/issue-101","pr_title":"feat(worker): implement validation","pr_body":"Ready."}',
+      })
+      .mockResolvedValueOnce({
+        sessionId: 'session-existing',
+        finalMessage:
+          '{"action":"submit_for_review","comment":"Validation fixed.","branch_name":"code-bot/issue-101","pr_title":"feat(worker): implement validation","pr_body":"Ready after validation fixes."}',
+      })
+
+    let validationCommandCalls = 0
+    ;(devpodService.runWorkspaceCommand as jest.Mock).mockImplementation(
+      async (_workspaceName: string, command: string) => {
+        validationCommandCalls += 1
+        if (validationCommandCalls <= 3 && (command.includes('pnpm type-check') || command.includes('pnpm build'))) {
+          throw new Error('command failed')
+        }
+        return { stdout: '', stderr: '' }
+      },
+    )
+
+    await service.startImplementation({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      workspaceName: 'harness-kanban-issue-101',
+    })
+
+    const validationCommands = (devpodService.runWorkspaceCommand as jest.Mock).mock.calls.map(call => call[1])
+    expect(validationCommands).toEqual([
+      "cd '/workspaces/harness-kanban-issue-101' && pnpm type-check",
+      "cd '/workspaces/harness-kanban-issue-101' && pnpm test",
+      "cd '/workspaces/harness-kanban-issue-101' && pnpm build",
+      "cd '/workspaces/harness-kanban-issue-101' && pnpm type-check",
+      "cd '/workspaces/harness-kanban-issue-101' && pnpm test",
+      "cd '/workspaces/harness-kanban-issue-101' && pnpm build",
+    ])
+    expect(provider.runWithSchema).toHaveBeenCalledTimes(2)
+    expect(provider.runWithSchema.mock.calls[1]?.[0].workflowLabel).toBe('repair_validation_failure')
+    expect(provider.runWithSchema.mock.calls[1]?.[0].prompt).toContain('"failedCommands": [')
+    expect(provider.runWithSchema.mock.calls[1]?.[0].prompt).toContain('"pnpm type-check"')
+    expect(provider.runWithSchema.mock.calls[1]?.[0].prompt).toContain('"pnpm build"')
+    expect(provider.runWithSchema.mock.calls[1]?.[0].prompt).not.toContain('command failed')
   })
 
   it('moves the issue to needs_help when implementation requests human help', async () => {
