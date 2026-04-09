@@ -81,13 +81,14 @@ A sub-component within the form file that renders:
 
 - Add `validationCommands: ['pnpm lint', 'pnpm type-check', 'pnpm test']` to mock project data
 
-#### 4. E2E Test Updates (if applicable)
+#### 4. Manual Verification
 
-**Test Scenarios:**
+**Chrome DevTools MCP:**
 
-- Create project with validation commands
-- Update project to add/remove/edit validation commands
-- Validation error scenarios (empty command, too long)
+- Use Chrome DevTools MCP to verify the validation commands feature works correctly in the actual product
+- Test creating a project with validation commands
+- Test updating validation commands on an existing project
+- Verify commands are properly saved and displayed after page refresh
 
 ### Integration Points
 
@@ -134,6 +135,7 @@ Before marking complete, verify:
 - [ ] Both create and update modes properly handle validation commands
 - [ ] No Chinese text in code or comments
 - [ ] Component structure aligns with backend API interfaces
+- [ ] Use Chrome DevTools MCP to verify the function works correctly in the actual product
 
 ## Notes
 
