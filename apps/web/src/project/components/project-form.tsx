@@ -25,6 +25,7 @@ import {
   UpdateProjectInput,
 } from '@repo/shared/project/types'
 import { ProjectSearchSelect } from './project-search-select'
+import { ValidationCommandsField } from './validation-commands-field'
 
 const MCP_CONFIG_PLACEHOLDER = `{
   "docs": {
@@ -95,6 +96,7 @@ const projectFormSchema = z.object({
     .min(1, 'Select a repository base branch')
     .max(255, 'Repository base branch must be at most 255 characters'),
   checkCiCd: z.boolean(),
+  validationCommands: z.array(z.string()),
   mcpConfigText: z.string().superRefine((value, ctx) => {
     const parsed = parseProjectMcpConfigText(value)
     if (parsed.error) {
@@ -136,6 +138,7 @@ const projectToFormValues = (project?: Partial<ProjectDetail>): ProjectFormValue
   githubRepoUrl: project?.githubRepoUrl ?? '',
   repoBaseBranch: project?.repoBaseBranch ?? '',
   checkCiCd: project?.checkCiCd ?? false,
+  validationCommands: project?.validationCommands ?? [],
   mcpConfigText: formatProjectMcpConfig(project?.mcpConfig),
 })
 
@@ -251,6 +254,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         githubRepoUrl: values.githubRepoUrl,
         repoBaseBranch: values.repoBaseBranch,
         checkCiCd: values.checkCiCd,
+        validationCommands: values.validationCommands,
         ...(parsedMcpConfig.config ? { mcpConfig: parsedMcpConfig.config } : {}),
       })
       return
@@ -259,6 +263,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
     await onSubmit({
       name: values.name,
       checkCiCd: values.checkCiCd,
+      validationCommands: values.validationCommands,
       mcpConfig: parsedMcpConfig.config,
     })
   }
@@ -272,7 +277,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       <div className="space-y-2">
         <Label htmlFor={`${mode}-project-name`}>Name</Label>
         <Input id={`${mode}-project-name`} {...register('name')} placeholder="Fraud detection service" />
-        {errors.name?.message ? <p className="text-sm text-red-500">{errors.name.message}</p> : null}
+        {errors.name?.message ? <p className="text-sm text-red-500">{String(errors.name.message)}</p> : null}
       </div>
 
       {showSettingsPrompt ? (
@@ -328,7 +333,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
                 <p className="text-sm text-red-500">{githubRepositoriesError.message}</p>
               ) : null}
               {errors.githubRepoUrl?.message ? (
-                <p className="text-sm text-red-500">{errors.githubRepoUrl.message}</p>
+                <p className="text-sm text-red-500">{String(errors.githubRepoUrl.message)}</p>
               ) : null}
             </>
           )}
@@ -377,7 +382,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
                 />
               )}
               {errors.repoBaseBranch?.message ? (
-                <p className="text-sm text-red-500">{errors.repoBaseBranch.message}</p>
+                <p className="text-sm text-red-500">{String(errors.repoBaseBranch.message)}</p>
               ) : null}
             </>
           )}
@@ -421,8 +426,23 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
           Store project-level MCP servers for coding agent workspaces. This config is loaded only when a new workspace
           is created, and existing workspaces stay unchanged.
         </p>
-        {errors.mcpConfigText?.message ? <p className="text-sm text-red-500">{errors.mcpConfigText.message}</p> : null}
+        {errors.mcpConfigText?.message ? (
+          <p className="text-sm text-red-500">{String(errors.mcpConfigText.message)}</p>
+        ) : null}
       </div>
+
+      <Controller
+        control={control}
+        name="validationCommands"
+        render={({ field }) => (
+          <ValidationCommandsField
+            value={field.value}
+            onChange={field.onChange}
+            error={errors.validationCommands?.message?.toString()}
+            mode={mode}
+          />
+        )}
+      />
 
       <div className="flex justify-end gap-2">
         {onCancel ? (

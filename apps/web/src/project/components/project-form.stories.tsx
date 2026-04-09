@@ -129,6 +129,18 @@ export const CreateMode: Story = {
     ) {
       throw new Error('Expected MCP config helper text to render.')
     }
+
+    const validationCommandsSection = canvasElement.querySelector(
+      '[data-testid="validation-commands-section"]',
+    ) as HTMLElement | null
+
+    if (!validationCommandsSection) {
+      throw new Error('Expected validation commands section to render.')
+    }
+
+    if (!canvasElement.textContent?.includes('Validation Commands')) {
+      throw new Error('Expected validation commands label to render.')
+    }
   },
 }
 
@@ -183,6 +195,7 @@ export const UpdateMode: Story = {
         repoBaseBranch: 'main',
         checkCiCd: true,
         previewCommands: ['pnpm install', 'pnpm dev'],
+        validationCommands: ['pnpm lint', 'pnpm type-check', 'pnpm test'],
         mcpConfig: {
           docs: {
             type: 'streamable-http',
@@ -221,6 +234,68 @@ export const UpdateMode: Story = {
     await waitForCondition(() => Boolean(mcpConfigField?.value.includes('"docs"')))
     if (!mcpConfigField?.value.includes('"docs"')) {
       throw new Error('Expected existing MCP config to render in update mode.')
+    }
+
+    const validationCommandsSection = canvasElement.querySelector(
+      '[data-testid="validation-commands-section"]',
+    ) as HTMLElement | null
+
+    if (!validationCommandsSection) {
+      throw new Error('Expected validation commands section to render in update mode.')
+    }
+
+    if (!canvasElement.textContent?.includes('pnpm lint')) {
+      throw new Error('Expected validation commands to render in update mode.')
+    }
+  },
+}
+
+export const UpdateModeWithEmptyValidationCommands: Story = {
+  render: () => (
+    <ProjectForm
+      mode="update"
+      submitLabel="Save changes"
+      onSubmit={async () => {}}
+      initialProject={{
+        id: 'project-2',
+        name: 'Project Beta',
+        githubRepoUrl: 'https://github.com/harness-kanban/project-beta',
+        repoBaseBranch: 'main',
+        checkCiCd: false,
+        previewCommands: [],
+        validationCommands: [],
+        mcpConfig: null,
+        workspaceId: 'workspace-123',
+        createdBy: 'user-1',
+        createdAt: '2026-03-11T00:00:00Z',
+        updatedAt: '2026-03-11T00:00:00Z',
+      }}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    await waitForCondition(() => canvasElement.textContent?.includes('No validation commands configured.') ?? false)
+
+    const validationCommandsSection = canvasElement.querySelector(
+      '[data-testid="validation-commands-section"]',
+    ) as HTMLElement | null
+
+    if (!validationCommandsSection) {
+      throw new Error('Expected validation commands section to render.')
+    }
+
+    if (!canvasElement.textContent?.includes('No validation commands configured.')) {
+      throw new Error('Expected empty state message for validation commands.')
+    }
+
+    const addButton = canvasElement.querySelector(
+      'button[aria-label="Add validation command"]',
+    ) as HTMLButtonElement | null
+    if (!addButton) {
+      throw new Error('Expected add validation command button to render.')
+    }
+
+    if (addButton.disabled) {
+      throw new Error('Expected add button to be enabled when input is empty.')
     }
   },
 }
