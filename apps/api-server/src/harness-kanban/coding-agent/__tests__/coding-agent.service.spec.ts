@@ -188,6 +188,23 @@ describe('CodingAgentService', () => {
     ).rejects.toThrow(new BadRequestException('Coding agent settings are invalid for type "claude-code".'))
   })
 
+  it('rejects Claude Code api keys that look like copied JSON fragments', async () => {
+    authService.checkUserPermission.mockResolvedValue(true)
+    ;(prismaService.client.coding_agent.findFirst as jest.Mock).mockResolvedValue(null)
+
+    await expect(
+      service.createCodingAgent(userId, workspaceId, {
+        name: 'Broken Claude Agent',
+        type: 'claude-code',
+        settings: {
+          apiKey: '"apiKey": "sk-test-123",',
+          baseUrl: 'https://api.example.com/',
+          model: 'sonnet',
+        },
+      }),
+    ).rejects.toThrow(new BadRequestException('Coding agent settings are invalid for type "claude-code".'))
+  })
+
   it('revalidates settings when the type changes during update', async () => {
     authService.checkUserPermission.mockResolvedValue(true)
     ;(prismaService.client.coding_agent.findFirst as jest.Mock).mockResolvedValue({

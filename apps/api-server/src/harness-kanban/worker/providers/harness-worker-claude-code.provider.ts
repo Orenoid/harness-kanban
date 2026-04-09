@@ -231,6 +231,7 @@ export class HarnessWorkerClaudeCodeProvider implements HarnessWorkerCodingAgent
       schemaBase64: string
     },
   ): string {
+    const canSkipPermissions = Boolean(context.remoteUser && context.remoteUser !== 'root')
     const lines = [
       'set -eu',
       'if [ -f "$HOME/.harness-kanban/path.sh" ]; then',
@@ -247,7 +248,7 @@ export class HarnessWorkerClaudeCodeProvider implements HarnessWorkerCodingAgent
       `printf '%s' ${context.quoteShellArg(input.schemaBase64)} | base64 -d > "$tmpdir/output-schema.json"`,
       `printf '%s' ${context.quoteShellArg(input.promptBase64)} | base64 -d > "$tmpdir/prompt.txt"`,
       `cd ${context.quoteShellArg(input.repoRoot)}`,
-      'set -- claude -p "$(cat "$tmpdir/prompt.txt")" --output-format json --json-schema "$(cat "$tmpdir/output-schema.json")" --dangerously-skip-permissions --model ' +
+      'set -- claude -p "$(cat "$tmpdir/prompt.txt")" --output-format json --json-schema "$(cat "$tmpdir/output-schema.json")" --model ' +
         `${context.quoteShellArg(context.settings.model)}`,
       `if [ -f ${CLAUDE_MCP_CONFIG_PATH} ]; then`,
       `  export MCP_TIMEOUT=${context.quoteShellArg(String(CLAUDE_MCP_TIMEOUT_MS))}`,
@@ -255,13 +256,17 @@ export class HarnessWorkerClaudeCodeProvider implements HarnessWorkerCodingAgent
       'fi',
     ]
 
+    if (canSkipPermissions) {
+      lines.push('set -- "$@" --dangerously-skip-permissions')
+    }
+
     if (input.resumeSessionId) {
       lines.push(`set -- "$@" --resume ${context.quoteShellArg(input.resumeSessionId)}`)
     }
 
     lines.push(
       'set +e',
-      '"$@" > "$tmpdir/claude-output.json" 2> "$tmpdir/claude-stderr.log"',
+      '"$@" < /dev/null > "$tmpdir/claude-output.json" 2> "$tmpdir/claude-stderr.log"',
       'claude_exit_code="$?"',
       'set -e',
       'node - "$tmpdir/claude-output.json" "$tmpdir/claude-stderr.log" "$claude_exit_code" <<\'NODE\'',

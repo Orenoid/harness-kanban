@@ -20,7 +20,14 @@ export type CodexReasoningEffort = z.infer<typeof codexReasoningEffortSchema>
 const codexModelSchema = z.string().trim().min(1, 'Codex model is required')
 const claudeCodeModelSchema = z.string().trim().min(1, 'Claude Code model is required')
 const claudeCodeBaseUrlSchema = z.string().trim().url('Claude Code base URL must be a valid URL')
-const apiKeySchema = z.string().trim().min(1, 'API key is required')
+const apiKeySchema = z
+  .string()
+  .trim()
+  .min(1, 'API key is required')
+  .refine(
+    value => !/"apiKey"\s*:/.test(value) && !value.startsWith('{') && !value.endsWith('}'),
+    'API key must be the raw credential value, not JSON or a copied config fragment.',
+  )
 const authJsonSchema = z.object({}).catchall(z.unknown())
 
 export const codingAgentExecutionStateSchema = z
