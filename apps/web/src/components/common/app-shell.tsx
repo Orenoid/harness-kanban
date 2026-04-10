@@ -111,9 +111,6 @@ export const AppSidebarView: React.FC<AppSidebarViewProps> = ({
       </div>
 
       <div className="flex flex-col items-center gap-2">
-        {notificationControl}
-        {userControl}
-
         <Tooltip>
           <TooltipTrigger asChild>
             <Link
@@ -161,6 +158,9 @@ export const AppSidebarView: React.FC<AppSidebarViewProps> = ({
             Toggle theme
           </TooltipContent>
         </Tooltip>
+
+        {notificationControl}
+        {userControl}
       </div>
     </aside>
   )

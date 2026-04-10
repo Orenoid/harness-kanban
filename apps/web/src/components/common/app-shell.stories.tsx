@@ -183,15 +183,17 @@ export const Default: Story = {
     assertElement(userButton, 'Expected the account trigger button to render.')
     assertElement(
       settingsLink?.parentElement === themeButton?.parentElement &&
+        settingsLink?.parentElement === notificationButton?.parentElement &&
         settingsLink?.parentElement === userButton?.parentElement,
-      'Expected settings, theme, and user controls to share the bottom control stack.',
+      'Expected settings, theme, notification, and user controls to share the bottom control stack.',
     )
 
     const bottomControls = Array.from(themeButton?.parentElement?.children ?? [])
     assertElement(
-      bottomControls.indexOf(userButton!) < bottomControls.indexOf(settingsLink!) &&
-        bottomControls.indexOf(settingsLink!) < bottomControls.indexOf(themeButton!),
-      'Expected Settings to appear between the user avatar and theme toggle.',
+      bottomControls.indexOf(settingsLink!) < bottomControls.indexOf(themeButton!) &&
+        bottomControls.indexOf(themeButton!) < bottomControls.indexOf(notificationButton!) &&
+        bottomControls.indexOf(notificationButton!) < bottomControls.indexOf(userButton!),
+      'Expected controls to be ordered team settings, theme toggle, notification, user avatar from top to bottom.',
     )
 
     const getThemeIconClassName = () =>
