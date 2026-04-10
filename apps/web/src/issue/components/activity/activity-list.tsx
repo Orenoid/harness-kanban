@@ -7,7 +7,6 @@ import { useIssueActivities } from '@/issue/hooks/use-issue-activities'
 import { shouldDisplayActivity } from '@/issue/registry/activity-behavior-registry'
 import { Activity } from '@repo/shared/issue/types'
 import { ActivityItem } from './activity-item'
-import { SubscribersSection } from './subscribers-section'
 
 interface ActivityListProps {
   issueId: number
@@ -18,7 +17,7 @@ interface ActivityListViewProps extends ActivityListProps {
   isLoading: boolean
 }
 
-export const ActivityListView: React.FC<ActivityListViewProps> = ({ issueId, activities, isLoading }) => {
+export const ActivityListView: React.FC<ActivityListViewProps> = ({ activities, isLoading }) => {
   const sortedActivities = useMemo(() => {
     return [...activities].sort((a, b) => {
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -35,7 +34,6 @@ export const ActivityListView: React.FC<ActivityListViewProps> = ({ issueId, act
     <div className="mt-6 px-0 py-2">
       <LayoutSlot className="mb-2 flex items-center justify-between px-2">
         <LayoutSlot className="shrink-0 text-lg font-medium">Activity</LayoutSlot>
-        <SubscribersSection issueId={issueId} />
       </LayoutSlot>
       <div className="space-y-4">
         {displayedActivities.map(activity => (
