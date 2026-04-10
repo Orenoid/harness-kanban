@@ -13,11 +13,7 @@ import { LayoutSlot } from '@/components/layout/layout-slot'
 import { Button } from '@/components/ui/button'
 import { IssuePageBreadcrumbs } from '@/issue/components/issue-page-breadcrumbs'
 import { useCreateIssue } from '@/issue/hooks/use-create-issue'
-import {
-  buildIssueDetailHref,
-  parseIssueNavigationContext,
-  resolveIssueBackTarget,
-} from '@/issue/utils/navigation-context'
+import { parseIssueNavigationContext, resolveIssueBackTarget } from '@/issue/utils/navigation-context'
 import { getZodSchemaFromPropertyMetas } from '@/property/forms/get-zod-schema'
 import { useIssuePropertyMetas } from '@/property/hooks/use-issue-property-metas'
 import { getEditableRenderer, shouldRenderProperty } from '@/property/registry/property-registry'
@@ -212,9 +208,10 @@ export const NewIssuePage: NextPage = () => {
   const handleCreateIssue = async ({ propertyValues }: { propertyValues: PropertyValue[] }) => {
     try {
       const { issueId: createdIssueId } = await createIssue({ propertyValues })
-      toast.success(`Issue created successfully. redirecting to issue #${createdIssueId}...`)
+      toast.success(`Issue #${createdIssueId} created successfully.`)
       setTimeout(() => {
-        router.push(buildIssueDetailHref(createdIssueId, navigationContext))
+        const backTarget = resolveIssueBackTarget(navigationContext)
+        router.push(backTarget.href)
       })
     } catch (error) {
       toast.error(`Failed to create issue: ${error instanceof Error ? error.message : 'Unknown error'}`)
