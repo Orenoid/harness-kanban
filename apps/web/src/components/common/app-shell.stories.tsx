@@ -263,7 +263,6 @@ export const UserProfileClicked: Story = {
 
     const menu = ownerDocument.querySelector('[role="menu"]')
     assertElement(menu, 'Expected the account dropdown menu to be visible.')
-    assertElement(menu?.textContent?.includes('Settings'), 'Expected the account menu to include Settings.')
     assertElement(menu?.textContent?.includes('Sign Out'), 'Expected the account menu to include Sign Out.')
   },
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { ChevronsUpDown, CircleUserRoundIcon, LogInIcon, LogOutIcon, SettingsIcon } from 'lucide-react'
+import { ChevronsUpDown, CircleUserRoundIcon, LogInIcon, LogOutIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -181,13 +181,6 @@ export function UserButtonCustomView({
         </div>
 
         <DropdownMenuSeparator className={classNames?.content?.separator} />
-
-        <Link href="/settings/connections">
-          <DropdownMenuItem className={classNames?.content?.menuItem}>
-            <SettingsIcon className="mr-2 h-4 w-4" />
-            Settings
-          </DropdownMenuItem>
-        </Link>
 
         <DropdownMenuItem
           className={classNames?.content?.menuItem}
