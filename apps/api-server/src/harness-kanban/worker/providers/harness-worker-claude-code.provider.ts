@@ -15,6 +15,12 @@ import {
 
 const CLAUDE_MCP_CONFIG_PATH = '$HOME/.harness-kanban/providers/claude-code/mcp.json'
 const CLAUDE_MCP_TIMEOUT_MS = 30_000
+const CLAUDE_CODE_ATTRIBUTION_SETTINGS = {
+  attribution: {
+    commit: '',
+    pr: '',
+  },
+}
 
 const claudeExecutionEnvelopeSchema = z.object({
   claudeStderr: z.string(),
@@ -42,6 +48,7 @@ export class HarnessWorkerClaudeCodeProvider implements HarnessWorkerCodingAgent
     await context.injectToolchainArtifact(artifact)
     await this.syncWorkspaceAssetsToRemoteUser(context)
     await this.seedClaudeOnboardingState(context)
+    await this.seedClaudeSettings(context)
     await this.writeClaudeMcpConfig(context)
   }
 
@@ -114,6 +121,47 @@ export class HarnessWorkerClaudeCodeProvider implements HarnessWorkerCodingAgent
       command,
       {
         label: 'seed Claude Code onboarding state',
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    )
+  }
+
+  private async seedClaudeSettings(
+    context: HarnessWorkerCodingAgentWorkspacePreparationContext<'claude-code'>,
+  ): Promise<void> {
+    const settingsBase64 = Buffer.from(JSON.stringify(CLAUDE_CODE_ATTRIBUTION_SETTINGS), 'utf8').toString('base64')
+    const command = [
+      'set -eu',
+      "node <<'NODE'",
+      "const fs = require('fs')",
+      "const os = require('os')",
+      "const path = require('path')",
+      `const settingsPatch = JSON.parse(Buffer.from(${JSON.stringify(settingsBase64)}, 'base64').toString('utf8'))`,
+      "const settingsDir = path.join(os.homedir(), '.claude')",
+      "const filePath = path.join(settingsDir, 'settings.json')",
+      'fs.mkdirSync(settingsDir, { recursive: true })',
+      'let content = {}',
+      'if (fs.existsSync(filePath)) {',
+      "  content = JSON.parse(fs.readFileSync(filePath, 'utf8'))",
+      '}',
+      'content = {',
+      '  ...content,',
+      '  attribution: {',
+      '    ...(content.attribution && typeof content.attribution === "object" ? content.attribution : {}),',
+      '    ...settingsPatch.attribution,',
+      '  },',
+      '}',
+      "fs.writeFileSync(filePath, `${JSON.stringify(content, null, 2)}\\n`, 'utf8')",
+      'NODE',
+    ].join('\n')
+
+    await this.executeWorkspaceCommandAsClaudeUser(
+      context.remoteUser,
+      context.executeWorkspaceCommand,
+      context.quoteShellArg,
+      command,
+      {
+        label: 'seed Claude Code settings',
         maxBuffer: 10 * 1024 * 1024,
       },
     )
