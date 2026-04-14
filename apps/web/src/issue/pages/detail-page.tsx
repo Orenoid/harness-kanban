@@ -216,7 +216,7 @@ export const DetailPage = () => {
     [issueId, queryClient, rollbackEditedValue, updateIssue],
   )
 
-  const debouncedPatchRef = useRef<Record<string, (value: unknown) => void>>({})
+  const debouncedPatchRef = useRef<Record<string, ReturnType<typeof debounce>>>({})
 
   const getDebouncedPatch = useCallback(
     (propertyId: string) => {
@@ -282,11 +282,27 @@ export const DetailPage = () => {
     setEditedValues(prev => {
       const next = { ...prev }
       for (const key of updatedKeys) {
-        if (next[key] !== undefined) delete next[key]
+        if (next[key] === undefined) continue
+        // Only clear edited value if the server value now matches what we sent.
+        // This prevents the stale server response from overwriting newer local input.
+        const serverValue = row[key]
+        if (next[key] === serverValue) {
+          delete next[key]
+        }
       }
       return next
     })
-  }, [issue])
+  }, [issue, row])
+
+  // Flush pending debounced patches on unmount so edits are not lost
+  useEffect(() => {
+    return () => {
+      const currentRef = debouncedPatchRef.current
+      for (const debouncedFn of Object.values(currentRef)) {
+        debouncedFn.flush()
+      }
+    }
+  }, [])
 
   if (isLoading || !issue) {
     return <GlobalLoading />
