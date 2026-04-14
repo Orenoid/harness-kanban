@@ -147,7 +147,7 @@ const TiptapEditorComponent = (
   const isUploadingRef = useRef(false)
   const hasUserInteracted = useRef(false)
   const isInternalUpdate = useRef(false)
-  const { debounceMs = 5000 } = options
+  const { debounceMs = 500 } = options
 
   const defaultUpload = (base64: string) => new Promise<string>(res => setTimeout(() => res(base64), 5000))
 
@@ -161,7 +161,7 @@ const TiptapEditorComponent = (
         // In manual mode, don't call onUpdate at all
         return
       } else if (updateMode === 'debounced') {
-        debouncedUpdate(value)
+        debouncedUpdate.call(value)
       } else {
         // immediate mode
         onUpdate?.(value)
@@ -285,6 +285,11 @@ const TiptapEditorComponent = (
       handleUpdate(val)
     },
     onBlur: ({ editor }) => {
+      // Flush any pending debounced update so the latest value is emitted
+      if (updateMode === 'debounced') {
+        debouncedUpdate.flush()
+      }
+
       if (onBlur) {
         const val = JSON.stringify(editor.getJSON())
         onBlur(val)
@@ -346,6 +351,13 @@ const TiptapEditorComponent = (
   useEffect(() => {
     editor?.setEditable(editable)
   }, [editor, editable])
+
+  // Flush pending debounced updates on unmount so edits are not lost
+  useEffect(() => {
+    return () => {
+      debouncedUpdate.flush()
+    }
+  }, [debouncedUpdate])
 
   if (!editor) {
     return null

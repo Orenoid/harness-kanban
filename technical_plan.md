@@ -65,13 +65,13 @@ Fix the bug where issue descriptions are sometimes not saved during creation or 
 
 ## Implementation Steps
 
-1. [ ] Refactor `useDebouncedCallback` to expose `flush` and `cancel` using `lodash-es/debounce`.
-2. [ ] Update `TiptapEditor` to reduce default `debounceMs` to 500 ms, flush pending debounce on `onBlur`, and cancel/flush on unmount.
-3. [ ] Update `EditableDescription` to pass `onBlur={onChange}` so blur forces the latest description value upward.
-4. [ ] Update `DetailPage` to flush all debounced patches in a `useEffect` cleanup, and adjust the `editedValues` reset logic to avoid overwriting newer local values.
-5. [ ] Update `create-page.tsx` to ensure the form reads the latest editor value (already addressed by reduced debounce + blur flush).
-6. [ ] Add/update unit tests for `use-debounce`, `TiptapEditor`, and `DetailPage` save flow.
-7. [ ] Run `pnpm type-check`, `pnpm build`, and `pnpm test` to verify no regressions.
+1. [x] Refactor `useDebouncedCallback` to expose `flush` and `cancel` using `lodash-es/debounce`.
+2. [x] Update `TiptapEditor` to reduce default `debounceMs` to 500 ms, flush pending debounce on `onBlur`, and cancel/flush on unmount.
+3. [x] Update `EditableDescription` to pass `onBlur={onChange}` so blur forces the latest description value upward.
+4. [x] Update `DetailPage` to flush all debounced patches in a `useEffect` cleanup, and adjust the `editedValues` reset logic to avoid overwriting newer local values.
+5. [x] Update `create-page.tsx` to ensure the form reads the latest editor value (already addressed by reduced debounce + blur flush).
+6. [x] Add/update unit tests for `use-debounce`, `TiptapEditor`, and `DetailPage` save flow.
+7. [x] Run `pnpm type-check`, `pnpm build`, and `pnpm test` to verify no regressions.
 
 ## Review Checklist
 

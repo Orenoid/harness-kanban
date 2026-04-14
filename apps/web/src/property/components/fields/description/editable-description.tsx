@@ -20,6 +20,7 @@ export const EditableDescription: RendererComponent<string> = ({ value, onChange
       value={value}
       updateMode="debounced"
       onUpdate={onChange}
+      onBlur={onChange}
       editable={!disabled}
       placeholder={placeholder}
       uploadImage={uploadImage}
