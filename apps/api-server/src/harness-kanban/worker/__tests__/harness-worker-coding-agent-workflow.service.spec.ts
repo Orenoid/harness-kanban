@@ -52,6 +52,11 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
             validation_commands: null,
           }),
         },
+        user: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'user-1',
+          }),
+        },
       },
     } as unknown as jest.Mocked<PrismaService>
 
@@ -66,6 +71,20 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
     } as unknown as jest.Mocked<ConfigService>
 
     codingAgentSnapshotService = {
+      ensureIssueCodingAgentSnapshot: jest.fn().mockResolvedValue({
+        id: 'snapshot-1',
+        name: 'Primary Claude Code',
+        type: 'claude-code',
+        settings: {
+          apiKey: 'sk-test-123',
+          baseUrl: 'https://api.example.com/',
+          model: 'claude-sonnet-4-20250514',
+          maxTurns: 20,
+        },
+        isDefault: false,
+        createdAt: '2026-04-04T00:00:00.000Z',
+        updatedAt: '2026-04-04T00:00:00.000Z',
+      }),
       getIssueCodingAgentSnapshot: jest.fn().mockResolvedValue({
         id: 'snapshot-1',
         name: 'Primary Claude Code',
@@ -221,6 +240,8 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
     } as unknown as jest.Mocked<HarnessWorkerCodingAgentProviderRegistry>
 
     devpodService = {
+      createWorkspaceForIssue: jest.fn(),
+      getWorkspaceNameForIssue: jest.fn(),
       resolveWorkspaceRemoteUser: jest.fn().mockResolvedValue('node'),
       runWorkspaceCommand: jest.fn(),
     } as unknown as jest.Mocked<HarnessWorkerDevpodService>
@@ -307,6 +328,195 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
       }),
     )
     expect(provider.runWithSchema.mock.calls[1]?.[0].prompt).toContain('Reply again with JSON only')
+  })
+
+  it('moves planning automation errors to planning_needs_help and assigns a human owner', async () => {
+    provider.runWithSchema
+      .mockResolvedValueOnce({
+        sessionId: 'session-1',
+        finalMessage: 'not valid json',
+      })
+      .mockResolvedValueOnce({
+        sessionId: 'session-1',
+        finalMessage: 'still not valid json',
+      })
+
+    await service.startPlanning({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      workspaceName: 'harness-kanban-issue-101',
+    })
+
+    expect(githubService.ensureDraftPullRequest).not.toHaveBeenCalled()
+    expect(issueService.updateIssue).toHaveBeenCalledWith(
+      {
+        workspaceId: 'workspace-1',
+        userId: SystemBotId.CODE_BOT,
+      },
+      {
+        issueId: 101,
+        operations: [
+          {
+            propertyId: SystemPropertyId.STATUS,
+            operationType: CommonPropertyOperationType.SET,
+            operationPayload: { value: 'planning_needs_help' },
+          },
+          {
+            propertyId: SystemPropertyId.ASSIGNEE,
+            operationType: CommonPropertyOperationType.SET,
+            operationPayload: { value: 'user-1' },
+          },
+        ],
+      },
+    )
+    expect(commentService.createComment).toHaveBeenCalledWith(
+      101,
+      expect.stringContaining('Technical planning automation could not complete for this issue.'),
+      SystemBotId.CODE_BOT,
+    )
+  })
+
+  it('promotes a claimed issue to planning and starts the planning pipeline', async () => {
+    const startPlanningSpy = jest.spyOn(service, 'startPlanning').mockResolvedValue(undefined)
+    devpodService.createWorkspaceForIssue.mockResolvedValue('harness-kanban-issue-101')
+
+    await service.startClaimedIssuePlanning({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+    })
+
+    expect(issueService.updateIssue).toHaveBeenCalledWith(
+      {
+        workspaceId: 'workspace-1',
+        userId: SystemBotId.CODE_BOT,
+      },
+      {
+        issueId: 101,
+        operations: [
+          {
+            propertyId: SystemPropertyId.STATUS,
+            operationType: CommonPropertyOperationType.SET,
+            operationPayload: { value: 'planning' },
+          },
+        ],
+      },
+    )
+    expect(codingAgentSnapshotService.ensureIssueCodingAgentSnapshot).toHaveBeenCalledWith(101, 'workspace-1')
+    expect(devpodService.createWorkspaceForIssue).toHaveBeenCalledWith(101, 'workspace-1')
+    expect(startPlanningSpy).toHaveBeenCalledWith({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      workspaceName: 'harness-kanban-issue-101',
+    })
+  })
+
+  it('records planning setup failure when a claimed issue cannot move to planning', async () => {
+    issueService.updateIssue
+      .mockResolvedValueOnce({
+        success: false,
+        errors: ['transition failed'],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        issueId: 101,
+      })
+
+    await service.startClaimedIssuePlanning({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+    })
+
+    expect(issueService.updateIssue).toHaveBeenLastCalledWith(
+      {
+        workspaceId: 'workspace-1',
+        userId: SystemBotId.CODE_BOT,
+      },
+      {
+        issueId: 101,
+        operations: [
+          {
+            propertyId: SystemPropertyId.STATUS,
+            operationType: CommonPropertyOperationType.SET,
+            operationPayload: { value: 'planning_needs_help' },
+          },
+          {
+            propertyId: SystemPropertyId.ASSIGNEE,
+            operationType: CommonPropertyOperationType.SET,
+            operationPayload: { value: 'user-1' },
+          },
+        ],
+      },
+    )
+    expect(codingAgentSnapshotService.ensureIssueCodingAgentSnapshot).not.toHaveBeenCalled()
+    expect(commentService.createComment).toHaveBeenCalledWith(
+      101,
+      expect.stringContaining('Technical planning automation could not complete for this issue.'),
+      SystemBotId.CODE_BOT,
+    )
+  })
+
+  it('recreates planning setup when a planning_needs_help continuation has no resume context', async () => {
+    const startPlanningSpy = jest.spyOn(service, 'startPlanning').mockResolvedValue(undefined)
+    devpodService.getWorkspaceNameForIssue.mockReturnValue('harness-kanban-issue-101')
+    devpodService.createWorkspaceForIssue.mockResolvedValue('harness-kanban-issue-101')
+    ;(prismaService.client.harness_worker.findFirst as unknown as jest.Mock).mockResolvedValueOnce({
+      devpod_metadata: null,
+    })
+    codingAgentSnapshotService.getIssueCodingAgentExecutionState.mockResolvedValueOnce(null)
+
+    await service.handleContinuationTrigger({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      trigger: 'resume_planning',
+      previousStatus: 'planning_needs_help',
+      nextStatus: 'planning',
+      requestedAt: '2026-03-15T00:00:00.000Z',
+      requestedBy: 'user-1',
+    })
+
+    expect(codingAgentSnapshotService.ensureIssueCodingAgentSnapshot).toHaveBeenCalledWith(101, 'workspace-1')
+    expect(devpodService.createWorkspaceForIssue).toHaveBeenCalledWith(101, 'workspace-1')
+    expect(startPlanningSpy).toHaveBeenCalledWith({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      workspaceName: 'harness-kanban-issue-101',
+    })
+  })
+
+  it('routes continuation triggers to the matching workflow step', async () => {
+    const requestPlanChangesSpy = jest.spyOn(service, 'requestPlanChanges').mockResolvedValue(undefined)
+    const startImplementationSpy = jest.spyOn(service, 'startImplementation').mockResolvedValue(undefined)
+    devpodService.getWorkspaceNameForIssue.mockReturnValue('harness-kanban-issue-101')
+
+    await service.handleContinuationTrigger({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      trigger: 'resume_planning',
+      previousStatus: 'plan_in_review',
+      nextStatus: 'planning',
+      requestedAt: '2026-03-15T00:00:00.000Z',
+      requestedBy: 'user-1',
+    })
+    await service.handleContinuationTrigger({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      trigger: 'approve_plan',
+      previousStatus: 'plan_in_review',
+      nextStatus: 'in_progress',
+      requestedAt: '2026-03-15T00:00:00.000Z',
+      requestedBy: 'user-1',
+    })
+
+    expect(requestPlanChangesSpy).toHaveBeenCalledWith({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      workspaceName: 'harness-kanban-issue-101',
+    })
+    expect(startImplementationSpy).toHaveBeenCalledWith({
+      issueId: 101,
+      workspaceId: 'workspace-1',
+      workspaceName: 'harness-kanban-issue-101',
+    })
   })
 
   it('builds the requestPlanChanges prompt with pull request review context', async () => {

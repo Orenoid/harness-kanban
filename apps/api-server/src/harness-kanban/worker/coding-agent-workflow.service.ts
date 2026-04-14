@@ -4,7 +4,7 @@ import { PrismaService } from '@/database/prisma.service'
 import { CodingAgentSnapshotService } from '@/harness-kanban/coding-agent/coding-agent-snapshot.service'
 import { CommentService } from '@/issue/comment.service'
 import { IssueService } from '@/issue/issue.service'
-import { SystemBotId } from '@/user/constants/user.constants'
+import { BOT_PREFIX, SystemBotId, UserType } from '@/user/constants/user.constants'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { CodingAgentDetail } from '@repo/shared'
@@ -25,7 +25,10 @@ import {
   HARNESS_WORKER_NEEDS_CLARIFICATION_ISSUE_STATUS,
   HARNESS_WORKER_NEEDS_HELP_ISSUE_STATUS,
   HARNESS_WORKER_PLAN_IN_REVIEW_ISSUE_STATUS,
+  HARNESS_WORKER_PLANNING_ISSUE_STATUS,
+  HARNESS_WORKER_PLANNING_NEEDS_HELP_ISSUE_STATUS,
 } from './worker.constants'
+import { HarnessWorkerIssueTrigger } from './worker.types'
 
 const DEFAULT_CODING_AGENT_OUTPUT_REPAIR_ATTEMPTS = 2
 const DEFAULT_IMPLEMENTATION_REVIEW_REPAIR_ATTEMPTS = 3
@@ -156,6 +159,16 @@ type HarnessWorkerCodingAgentWorkflowInput = {
   workspaceName: string
 }
 
+type HarnessWorkerFailureInput = {
+  issueId: number
+  workspaceId: string
+}
+
+type HarnessWorkerClaimedIssueInput = {
+  issueId: number
+  workspaceId: string
+}
+
 type IssueDetail = {
   comments: Array<Record<string, unknown>>
   createdBy: string
@@ -266,6 +279,102 @@ export class HarnessWorkerCodingAgentWorkflowService {
       'HARNESS_WORKER_CODING_AGENT_TIMEOUT_MS',
       this.getPositiveInteger('HARNESS_WORKER_CODEX_TIMEOUT_MS', DEFAULT_CODING_AGENT_TIMEOUT_MS),
     )
+  }
+
+  async startClaimedIssuePlanning(input: HarnessWorkerClaimedIssueInput): Promise<void> {
+    let promotedToPlanning = false
+
+    try {
+      const result = await this.issueService.updateIssue(
+        {
+          workspaceId: input.workspaceId,
+          userId: SystemBotId.CODE_BOT,
+        },
+        {
+          issueId: input.issueId,
+          operations: [
+            {
+              propertyId: SystemPropertyId.STATUS,
+              operationType: CommonPropertyOperationType.SET,
+              operationPayload: { value: HARNESS_WORKER_PLANNING_ISSUE_STATUS },
+            },
+          ],
+        },
+      )
+
+      if (result.success) {
+        promotedToPlanning = true
+      } else {
+        this.logger.error(
+          `Failed to move claimed issue ${input.issueId} to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}: ${(result.errors ?? ['Unknown error']).join(', ')}`,
+        )
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(
+        `Failed to move claimed issue ${input.issueId} to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}: ${message}`,
+      )
+    }
+
+    if (!promotedToPlanning) {
+      await this.recordPlanningPipelineFailure(
+        input,
+        new Error(`Failed to move claimed issue ${input.issueId} to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}`),
+      )
+      return
+    }
+
+    this.logger.log(`Claimed queued issue ${input.issueId} and moved it to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}`)
+    await this.startPlanningPipeline(input)
+  }
+
+  async handleContinuationTrigger(trigger: HarnessWorkerIssueTrigger): Promise<void> {
+    if (trigger.trigger === 'release_claim') {
+      return
+    }
+
+    const workspaceName = this.devpodService.getWorkspaceNameForIssue(trigger.issueId)
+
+    switch (trigger.trigger) {
+      case 'resume_planning':
+        if (trigger.previousStatus === HARNESS_WORKER_PLAN_IN_REVIEW_ISSUE_STATUS) {
+          await this.requestPlanChanges({
+            issueId: trigger.issueId,
+            workspaceId: trigger.workspaceId,
+            workspaceName,
+          })
+        } else if (trigger.previousStatus === HARNESS_WORKER_PLANNING_NEEDS_HELP_ISSUE_STATUS) {
+          await this.continuePlanningAfterHelp(trigger.issueId, trigger.workspaceId)
+        } else {
+          await this.resumePlanning({
+            issueId: trigger.issueId,
+            workspaceId: trigger.workspaceId,
+            workspaceName,
+          })
+        }
+        break
+      case 'approve_plan':
+        await this.startImplementation({
+          issueId: trigger.issueId,
+          workspaceId: trigger.workspaceId,
+          workspaceName,
+        })
+        break
+      case 'resume_implementation':
+        await this.resumeImplementation({
+          issueId: trigger.issueId,
+          workspaceId: trigger.workspaceId,
+          workspaceName,
+        })
+        break
+      case 'requested_code_changes':
+        await this.applyRequestedCodeChanges({
+          issueId: trigger.issueId,
+          workspaceId: trigger.workspaceId,
+          workspaceName,
+        })
+        break
+    }
   }
 
   async startPlanning(input: HarnessWorkerCodingAgentWorkflowInput): Promise<void> {
@@ -427,6 +536,96 @@ export class HarnessWorkerCodingAgentWorkflowService {
       await this.handleImplementationResult(input, implementationResult)
     } catch (error) {
       await this.handleImplementationFailure(input.issueId, input.workspaceId, error)
+    }
+  }
+
+  async recordWorkerFailure(
+    input: HarnessWorkerFailureInput,
+    error: unknown,
+    options: {
+      instruction: string
+      workflowLabel: string
+    },
+  ): Promise<void> {
+    await this.handlePlanningFailure(input.issueId, input.workspaceId, error, options)
+  }
+
+  private async startPlanningPipeline(input: HarnessWorkerClaimedIssueInput): Promise<void> {
+    try {
+      await this.codingAgentSnapshotService.ensureIssueCodingAgentSnapshot(input.issueId, input.workspaceId)
+
+      this.logger.log(`Planning pipeline for issue ${input.issueId}: creating DevPod workspace`)
+      const workspaceName = await this.devpodService.createWorkspaceForIssue(input.issueId, input.workspaceId)
+      if (!workspaceName) {
+        throw new Error('DevPod workspace setup did not complete successfully')
+      }
+
+      this.logger.log(
+        `Planning pipeline for issue ${input.issueId}: running coding agent planning in workspace ${workspaceName}`,
+      )
+      await this.startPlanning({
+        issueId: input.issueId,
+        workspaceId: input.workspaceId,
+        workspaceName,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(`Planning workflow failed for issue ${input.issueId}: ${message}`)
+      await this.recordPlanningPipelineFailure(input, error)
+    }
+  }
+
+  private async continuePlanningAfterHelp(issueId: number, workspaceId: string): Promise<void> {
+    const workspaceName = this.devpodService.getWorkspaceNameForIssue(issueId)
+    if (await this.canResumePlanning(issueId)) {
+      await this.resumePlanning({
+        issueId,
+        workspaceId,
+        workspaceName,
+      })
+      return
+    }
+
+    await this.startPlanningPipeline({ issueId, workspaceId })
+  }
+
+  private async canResumePlanning(issueId: number): Promise<boolean> {
+    const [executionState, worker] = await Promise.all([
+      this.codingAgentSnapshotService.getIssueCodingAgentExecutionState(issueId),
+      this.prisma.client.harness_worker.findFirst({
+        where: {
+          issue_id: issueId,
+        },
+        select: {
+          devpod_metadata: true,
+        },
+      }),
+    ])
+
+    const metadata = this.asRecord(worker?.devpod_metadata)
+    const result = this.asRecord(metadata?.result)
+    const substitution = this.asRecord(result?.substitution)
+    const workspaceRoot = substitution?.containerWorkspaceFolder
+    const sessionId = executionState?.sessionId?.trim()
+
+    return Boolean(
+      typeof sessionId === 'string' &&
+        sessionId.length > 0 &&
+        typeof workspaceRoot === 'string' &&
+        workspaceRoot.trim().length > 0,
+    )
+  }
+
+  private async recordPlanningPipelineFailure(input: HarnessWorkerClaimedIssueInput, error: unknown): Promise<void> {
+    try {
+      await this.recordWorkerFailure(input, error, {
+        workflowLabel: 'planning setup',
+        instruction: 'Please resolve the blocker and move the issue back to Planning if planning should continue.',
+      })
+    } catch (failureRecordingError) {
+      const message =
+        failureRecordingError instanceof Error ? failureRecordingError.message : String(failureRecordingError)
+      this.logger.error(`Failed to record planning setup failure for issue ${input.issueId}: ${message}`)
     }
   }
 
@@ -1012,11 +1211,12 @@ export class HarnessWorkerCodingAgentWorkflowService {
     const summary = await this.loadIssueSummary(issueId)
 
     if (planningResult.action === 'ask_questions') {
+      const assigneeId = await this.resolveHumanAssigneeId(issueId, summary.createdBy)
       const transitionResult = await this.transitionIssue(
         issueId,
         workspaceId,
         HARNESS_WORKER_NEEDS_CLARIFICATION_ISSUE_STATUS,
-        summary.createdBy,
+        assigneeId,
       )
       if (!transitionResult.success) {
         throw new Error(
@@ -1036,11 +1236,12 @@ export class HarnessWorkerCodingAgentWorkflowService {
       pullRequestBody: planningResult.pr_body,
     })
 
+    const assigneeId = await this.resolveHumanAssigneeId(issueId, summary.createdBy)
     const transitionResult = await this.transitionIssue(
       issueId,
       workspaceId,
       HARNESS_WORKER_PLAN_IN_REVIEW_ISSUE_STATUS,
-      summary.createdBy,
+      assigneeId,
     )
     if (!transitionResult.success) {
       throw new Error(
@@ -1278,11 +1479,12 @@ export class HarnessWorkerCodingAgentWorkflowService {
     assigneeId: string,
     comment: string,
   ): Promise<void> {
+    const humanAssigneeId = await this.resolveHumanAssigneeId(issueId, assigneeId)
     const transitionResult = await this.transitionIssue(
       issueId,
       workspaceId,
       HARNESS_WORKER_NEEDS_HELP_ISSUE_STATUS,
-      assigneeId,
+      humanAssigneeId,
     )
     if (!transitionResult.success) {
       throw new Error(
@@ -1307,16 +1509,17 @@ export class HarnessWorkerCodingAgentWorkflowService {
 
     try {
       const summary = await this.loadIssueSummary(issueId)
+      const assigneeId = await this.resolveHumanAssigneeId(issueId, summary.createdBy)
       const transitionResult = await this.transitionIssue(
         issueId,
         workspaceId,
-        HARNESS_WORKER_NEEDS_CLARIFICATION_ISSUE_STATUS,
-        summary.createdBy,
+        HARNESS_WORKER_PLANNING_NEEDS_HELP_ISSUE_STATUS,
+        assigneeId,
       )
 
       if (!transitionResult.success) {
         this.logger.error(
-          `Failed to move issue ${issueId} to ${HARNESS_WORKER_NEEDS_CLARIFICATION_ISSUE_STATUS}: ${(transitionResult.errors ?? ['Unknown error']).join(', ')}`,
+          `Failed to move issue ${issueId} to ${HARNESS_WORKER_PLANNING_NEEDS_HELP_ISSUE_STATUS}: ${(transitionResult.errors ?? ['Unknown error']).join(', ')}`,
         )
       }
 
@@ -1343,11 +1546,12 @@ export class HarnessWorkerCodingAgentWorkflowService {
 
     try {
       const summary = await this.loadIssueSummary(issueId)
+      const assigneeId = await this.resolveHumanAssigneeId(issueId, summary.createdBy)
       const transitionResult = await this.transitionIssue(
         issueId,
         workspaceId,
         HARNESS_WORKER_NEEDS_HELP_ISSUE_STATUS,
-        summary.createdBy,
+        assigneeId,
       )
 
       if (!transitionResult.success) {
@@ -1400,6 +1604,50 @@ export class HarnessWorkerCodingAgentWorkflowService {
         operations,
       },
     )
+  }
+
+  private async resolveHumanAssigneeId(issueId: number, preferredAssigneeId: string | null): Promise<string | null> {
+    if (this.isHumanUserId(preferredAssigneeId)) {
+      return preferredAssigneeId
+    }
+
+    const reporterRecord = await this.prisma.client.property_single_value.findFirst({
+      where: {
+        issue_id: issueId,
+        property_id: SystemPropertyId.REPORTER,
+        deleted_at: null,
+      },
+      select: {
+        value: true,
+      },
+    })
+
+    if (this.isHumanUserId(reporterRecord?.value)) {
+      return reporterRecord.value
+    }
+
+    const fallbackUser = await this.prisma.client.user.findFirst({
+      where: {
+        type: UserType.USER,
+      },
+      orderBy: {
+        createdAt: 'asc',
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    if (!fallbackUser) {
+      this.logger.error(`No human assignee is available for issue ${issueId}`)
+      return null
+    }
+
+    return fallbackUser.id
+  }
+
+  private isHumanUserId(userId: string | null | undefined): userId is string {
+    return typeof userId === 'string' && userId.trim().length > 0 && !userId.startsWith(BOT_PREFIX)
   }
 
   private async loadIssueSummary(issueId: number): Promise<{ createdBy: string; title: string }> {

@@ -1,10 +1,9 @@
 import { PrismaService } from '@/database/prisma.service'
-import { IssueService } from '@/issue/issue.service'
 import { PgmqService } from '@/pgmq/pgmq.service'
 import { SystemBotId } from '@/user/constants/user.constants'
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common'
 import { Prisma } from '@repo/database'
-import { CommonPropertyOperationType, SystemPropertyId } from '@repo/shared/property/constants'
+import { SystemPropertyId } from '@repo/shared/property/constants'
 import { CodingAgentSnapshotService } from '../coding-agent/coding-agent-snapshot.service'
 import { HarnessWorkerCodingAgentWorkflowService } from './coding-agent-workflow.service'
 import { HarnessWorkerDevpodService } from './devpod.service'
@@ -15,8 +14,6 @@ import {
   getHarnessWorkerDispatchQueueName,
   HARNESS_WORKER_BUSY_STATUS,
   HARNESS_WORKER_IDLE_STATUS,
-  HARNESS_WORKER_PLAN_IN_REVIEW_ISSUE_STATUS,
-  HARNESS_WORKER_PLANNING_ISSUE_STATUS,
   HARNESS_WORKER_QUEUED_ISSUE_STATUS,
 } from './worker.constants'
 import { HarnessWorkerIssueTrigger } from './worker.types'
@@ -47,7 +44,6 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
     private readonly devpodService: HarnessWorkerDevpodService,
     private readonly codingAgentSnapshotService: CodingAgentSnapshotService,
     private readonly codingAgentWorkflowService: HarnessWorkerCodingAgentWorkflowService,
-    private readonly issueService: IssueService,
     private readonly pgmqService: PgmqService,
   ) {}
 
@@ -356,66 +352,7 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
 
       this.isProcessingClaimedIssue = true
       try {
-        let promotedToPlanning = false
-        try {
-          const result = await this.issueService.updateIssue(
-            {
-              workspaceId: claim.workspaceId,
-              userId: SystemBotId.CODE_BOT,
-            },
-            {
-              issueId: claim.issueId,
-              operations: [
-                {
-                  propertyId: SystemPropertyId.STATUS,
-                  operationType: CommonPropertyOperationType.SET,
-                  operationPayload: { value: HARNESS_WORKER_PLANNING_ISSUE_STATUS },
-                },
-              ],
-            },
-          )
-
-          if (result.success) {
-            promotedToPlanning = true
-          } else {
-            this.logger.error(
-              `Failed to move claimed issue ${claim.issueId} to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}: ${(result.errors ?? ['Unknown error']).join(', ')}`,
-            )
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          this.logger.error(
-            `Failed to move claimed issue ${claim.issueId} to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}: ${message}`,
-          )
-        }
-
-        if (!promotedToPlanning) {
-          await this.releaseClaimAfterTransitionFailure(claim.issueId)
-          return
-        }
-
-        this.logger.log(`Claimed queued issue ${claim.issueId} and moved it to ${HARNESS_WORKER_PLANNING_ISSUE_STATUS}`)
-        try {
-          await this.codingAgentSnapshotService.ensureIssueCodingAgentSnapshot(claim.issueId, claim.workspaceId)
-
-          this.logger.log(`Planning pipeline for issue ${claim.issueId}: creating DevPod workspace`)
-          const workspaceName = await this.devpodService.createWorkspaceForIssue(claim.issueId, claim.workspaceId)
-          if (!workspaceName) {
-            throw new Error('DevPod workspace setup did not complete successfully')
-          }
-
-          this.logger.log(
-            `Planning pipeline for issue ${claim.issueId}: running coding agent planning in workspace ${workspaceName}`,
-          )
-          await this.codingAgentWorkflowService.startPlanning({
-            issueId: claim.issueId,
-            workspaceId: claim.workspaceId,
-            workspaceName,
-          })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          this.logger.error(`Planning workflow failed for issue ${claim.issueId}: ${message}`)
-        }
+        await this.codingAgentWorkflowService.startClaimedIssuePlanning(claim)
       } finally {
         this.isProcessingClaimedIssue = false
       }
@@ -455,46 +392,10 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
             await this.releaseClaim()
             this.logger.log(`Released worker claim for issue ${issueId} after receiving release trigger`)
           } else {
-            const workspaceName = this.devpodService.getWorkspaceNameForIssue(issueId)
-
-            switch (message.message.trigger) {
-              case 'resume_planning':
-                if (message.message.previousStatus === HARNESS_WORKER_PLAN_IN_REVIEW_ISSUE_STATUS) {
-                  await this.codingAgentWorkflowService.requestPlanChanges({
-                    issueId,
-                    workspaceId: message.message.workspaceId,
-                    workspaceName,
-                  })
-                } else {
-                  await this.codingAgentWorkflowService.resumePlanning({
-                    issueId,
-                    workspaceId: message.message.workspaceId,
-                    workspaceName,
-                  })
-                }
-                break
-              case 'approve_plan':
-                await this.codingAgentWorkflowService.startImplementation({
-                  issueId,
-                  workspaceId: message.message.workspaceId,
-                  workspaceName,
-                })
-                break
-              case 'resume_implementation':
-                await this.codingAgentWorkflowService.resumeImplementation({
-                  issueId,
-                  workspaceId: message.message.workspaceId,
-                  workspaceName,
-                })
-                break
-              case 'requested_code_changes':
-                await this.codingAgentWorkflowService.applyRequestedCodeChanges({
-                  issueId,
-                  workspaceId: message.message.workspaceId,
-                  workspaceName,
-                })
-                break
-            }
+            await this.codingAgentWorkflowService.handleContinuationTrigger({
+              ...message.message,
+              issueId,
+            })
           }
         } finally {
           this.isProcessingClaimedIssue = false
@@ -512,16 +413,6 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
       }
     } finally {
       this.isDispatchPolling = false
-    }
-  }
-
-  private async releaseClaimAfterTransitionFailure(issueId: number): Promise<void> {
-    try {
-      await this.releaseClaim()
-      this.logger.warn(`Released worker claim for issue ${issueId} after planning transition failure`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.logger.error(`Failed to release worker claim for issue ${issueId}: ${message}`)
     }
   }
 

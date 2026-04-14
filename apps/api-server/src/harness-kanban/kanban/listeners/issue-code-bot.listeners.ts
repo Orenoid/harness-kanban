@@ -15,6 +15,7 @@ import {
   HARNESS_WORKER_NEEDS_HELP_ISSUE_STATUS,
   HARNESS_WORKER_PLAN_IN_REVIEW_ISSUE_STATUS,
   HARNESS_WORKER_PLANNING_ISSUE_STATUS,
+  HARNESS_WORKER_PLANNING_NEEDS_HELP_ISSUE_STATUS,
   HARNESS_WORKER_QUEUED_ISSUE_STATUS,
   HARNESS_WORKER_TERMINAL_ISSUE_STATUSES,
 } from '../../worker/worker.constants'
@@ -193,6 +194,13 @@ export class CodeBotIssueTriggerListener {
 
     if (
       previousStatus === HARNESS_WORKER_NEEDS_CLARIFICATION_ISSUE_STATUS &&
+      nextStatus === HARNESS_WORKER_PLANNING_ISSUE_STATUS
+    ) {
+      return 'resume_planning'
+    }
+
+    if (
+      previousStatus === HARNESS_WORKER_PLANNING_NEEDS_HELP_ISSUE_STATUS &&
       nextStatus === HARNESS_WORKER_PLANNING_ISSUE_STATUS
     ) {
       return 'resume_planning'

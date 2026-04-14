@@ -98,6 +98,66 @@ describe('CodeBotIssueTriggerListener', () => {
     )
   })
 
+  it('publishes resume_planning when a planning blocker is resolved', async () => {
+    await listener.handleIssueUpdated({
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      issueId: 101,
+      updatedPropertyIds: [SystemPropertyId.STATUS],
+      propertyChanges: [
+        {
+          propertyId: SystemPropertyId.STATUS,
+          previousValue: 'planning_needs_help',
+          newValue: 'planning',
+        },
+      ],
+    })
+
+    expect(updateIssueMock).toHaveBeenCalledWith(
+      {
+        workspaceId: 'workspace-1',
+        userId: SystemBotId.CODE_BOT,
+      },
+      {
+        issueId: 101,
+        operations: [
+          {
+            propertyId: SystemPropertyId.ASSIGNEE,
+            operationType: CommonPropertyOperationType.SET,
+            operationPayload: { value: SystemBotId.CODE_BOT },
+          },
+        ],
+      },
+    )
+    expect(sendMock).toHaveBeenCalledWith(
+      'harness_issue_dispatch_101',
+      expect.objectContaining({
+        trigger: 'resume_planning',
+        previousStatus: 'planning_needs_help',
+        nextStatus: 'planning',
+      }),
+    )
+  })
+
+  it('does not resume planning from implementation help', async () => {
+    await listener.handleIssueUpdated({
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      issueId: 101,
+      updatedPropertyIds: [SystemPropertyId.STATUS],
+      propertyChanges: [
+        {
+          propertyId: SystemPropertyId.STATUS,
+          previousValue: 'needs_help',
+          newValue: 'planning',
+        },
+      ],
+    })
+
+    expect(updateIssueMock).not.toHaveBeenCalled()
+    expect(sendMock).not.toHaveBeenCalled()
+  })
+
   it('publishes release_claim when a claimed issue reaches a terminal status', async () => {
     await listener.handleIssueUpdated({
       workspaceId: 'workspace-1',
