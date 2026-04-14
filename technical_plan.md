@@ -10,6 +10,21 @@ Completely rewrite the comment input and rendering components to support markdow
 
 ## Technical Design
 
+### Storage Format Decision
+
+The primary storage format for new comments will be **standard markdown plain text**, not Tiptap JSON. This is essential so that the coding agent can post markdown replies directly without any dedicated JSON structure.
+
+- When a comment has no properties, it is stored as a raw markdown string.
+- When a comment has properties (enhanced comments), it is stored as a lightweight JSON wrapper where the `content` field is a markdown string:
+  ```json
+  {
+    "content": "# Markdown string",
+    "attr": { "data": { "propertyId": "value" } }
+  }
+  ```
+- Tiptap is used **only as a WYSIWYG editing surface**. On save, the editor serializes to markdown. On load, it parses markdown back into the Tiptap document tree.
+- Old Tiptap JSON comments are treated as plain text fallback without migration.
+
 ### 1. Markdown Rendering Component (`MarkdownRenderer`)
 
 - **Location:** `apps/web/src/components/core/markdown-renderer.tsx`
@@ -24,9 +39,9 @@ Completely rewrite the comment input and rendering components to support markdow
 - **Location:** `apps/web/src/components/core/markdown-editor.tsx`
 - **Base:** Reuse Tiptap to provide a WYSIWYG experience (slash commands, lists, headings, code blocks, image paste/upload).
 - **Serialization:** Use `prosemirror-markdown` (already installed) or add `tiptap-markdown` to convert between Tiptap's document tree and markdown strings on save/load.
-- **API:** Expose an imperative handle (`MarkdownEditorHandle`) with `getValue()`, `setValue()`, `clear()`, and `focusEnd()` to match the current `TiptapEditorHandle` contract.
+- **API:** Expose an imperative handle (`MarkdownEditorHandle`) with `getValue()` returning a markdown string, `setValue()` accepting markdown, `clear()`, and `focusEnd()` to match the current editor contract.
 - **Placeholder:** Set placeholder text to `"Write a comment... Markdown syntax is supported"`.
-- **Image Upload:** Retain the existing base64 image paste-and-upload flow.
+- **Image Upload:** Retain the existing base64 image paste-and-upload flow; uploaded images are inserted as markdown image syntax.
 
 ### 3. Comment Property Parser Update
 
@@ -44,7 +59,7 @@ Completely rewrite the comment input and rendering components to support markdow
 
 - **`CommentForm`** (`apps/web/src/issue/components/comment/comment-form.tsx`):
   - Replace `TiptapEditor` with `MarkdownEditor`.
-  - Store and submit comment content as a markdown string (or the new wrapped format when properties are absent).
+  - Store and submit comment content as a plain markdown string.
 - **`EnhancedCommentForm`** (`apps/web/src/issue/components/comment/enhanced-comment-form.tsx`):
   - Replace `TiptapEditor` with `MarkdownEditor`.
   - Keep the tabbed property UI but wrap the markdown output with property metadata using the updated parser.
@@ -71,7 +86,7 @@ Completely rewrite the comment input and rendering components to support markdow
 2. [ ] Create `MarkdownRenderer` component with `shiki` highlighting and `prose` styling.
 3. [ ] Create `MarkdownEditor` component based on Tiptap with markdown serialization.
 4. [ ] Update `comment-property/parser.ts` to support the new markdown-wrapped format.
-5. [ ] Rewrite `CommentForm` to use `MarkdownEditor`.
+5. [ ] Rewrite `CommentForm` to use `MarkdownEditor` and submit plain markdown.
 6. [ ] Rewrite `EnhancedCommentForm` to use `MarkdownEditor` with property metadata.
 7. [ ] Rewrite `CommentItem` to use `MarkdownRenderer` and `MarkdownEditor`.
 8. [ ] Add Storybook stories for `MarkdownRenderer` and `MarkdownEditor`.
