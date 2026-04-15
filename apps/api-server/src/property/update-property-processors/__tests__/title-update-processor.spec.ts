@@ -62,6 +62,23 @@ describe('TitleUpdatePropertyProcessor', () => {
       expect(result.valid).toBe(false)
       expect(result.errors).toContain('SET operation requires a string value')
     })
+
+    it('should return invalid for string exceeding max length (200)', () => {
+      const result = processor.validateFormat(mockProperty, CommonPropertyOperationType.SET.toString(), {
+        value: 'A'.repeat(201),
+      })
+
+      expect(result.valid).toBe(false)
+      expect(result.errors).toContain('Property Title cannot be longer than 200 characters')
+    })
+
+    it('should return valid for string at exactly max length (200)', () => {
+      const result = processor.validateFormat(mockProperty, CommonPropertyOperationType.SET.toString(), {
+        value: 'A'.repeat(200),
+      })
+
+      expect(result.valid).toBe(true)
+    })
   })
 
   describe('validateBusinessRules', () => {

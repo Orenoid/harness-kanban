@@ -45,16 +45,16 @@ describe('TitlePropertyProcessor', () => {
       expect(result.errors).toContain('Property Title cannot be empty')
     })
 
-    it('should return invalid for string exceeding max length (50)', () => {
-      const longTitle = 'A'.repeat(51)
+    it('should return invalid for string exceeding max length (200)', () => {
+      const longTitle = 'A'.repeat(201)
       const result = processor.validateFormat(mockProperty, longTitle)
 
       expect(result.valid).toBe(false)
-      expect(result.errors).toContain('Property Title cannot be longer than 50 characters')
+      expect(result.errors).toContain('Property Title cannot be longer than 200 characters')
     })
 
-    it('should return valid for string at exactly max length (50)', () => {
-      const exactTitle = 'A'.repeat(50)
+    it('should return valid for string at exactly max length (200)', () => {
+      const exactTitle = 'A'.repeat(200)
       const result = processor.validateFormat(mockProperty, exactTitle)
 
       expect(result.valid).toBe(true)

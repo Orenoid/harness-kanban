@@ -5,10 +5,12 @@ import { PropertyDefinition } from '@repo/shared/property/types'
 import { DbUpdateOperationResult, ValidationResult } from '../types/property.types'
 import { BaseUpdatePropertyProcessor } from './base'
 
+const MAX_LENGTH = 200
+
 @Injectable()
 export class TitleUpdatePropertyProcessor extends BaseUpdatePropertyProcessor {
   validateFormat(
-    _property: PropertyDefinition,
+    property: PropertyDefinition,
     operationType: string,
     payload: Record<string, unknown>,
   ): ValidationResult {
@@ -22,6 +24,12 @@ export class TitleUpdatePropertyProcessor extends BaseUpdatePropertyProcessor {
       return {
         valid: false,
         errors: ['SET operation requires a string value'],
+      }
+    }
+    if (payload.value.length > MAX_LENGTH) {
+      return {
+        valid: false,
+        errors: [`Property ${property.name} cannot be longer than ${MAX_LENGTH} characters`],
       }
     }
     return { valid: true }

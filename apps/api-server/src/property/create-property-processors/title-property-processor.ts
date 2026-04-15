@@ -5,7 +5,7 @@ import { PropertyDefinition } from '@repo/shared/property/types'
 import { DbInsertData, ValidationResult } from '../types/property.types'
 import { BasePropertyProcessor } from './base'
 
-const MAX_LENGTH = 50
+const MAX_LENGTH = 200
 
 @Injectable()
 export class TitlePropertyProcessor extends BasePropertyProcessor {
