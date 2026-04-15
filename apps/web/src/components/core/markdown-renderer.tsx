@@ -25,13 +25,24 @@ const isValidLanguage = (lang: string): lang is BundledLanguage => {
   return lang.length > 0 && /^[a-z0-9_-]+$/i.test(lang)
 }
 
-const MarkdownCodeBlock: Components['pre'] = ({ children }) => {
+const MarkdownCodeBlock = ({ children }: { children?: React.ReactNode }) => {
   // Code blocks are rendered by the `code` component below.
   // We return a fragment to avoid extra <pre> nesting.
   return <>{children}</>
 }
 
-const MarkdownCode: Components['code'] = ({ className, children, node, ...props }) => {
+interface MarkdownCodeProps {
+  className?: string
+  children?: React.ReactNode
+  node?: {
+    position?: {
+      start?: { line: number; column: number; offset: number }
+      end?: { line: number; column: number; offset: number }
+    }
+  }
+}
+
+const MarkdownCode: React.FC<MarkdownCodeProps> = ({ className, children, node, ...props }) => {
   const isInline = useMemo(() => {
     if (!node?.position) return true
     // Heuristic: if parent is a paragraph, it's inline code.
@@ -74,8 +85,8 @@ const MarkdownCode: Components['code'] = ({ className, children, node, ...props 
 }
 
 const MarkdownComponents: Partial<Components> = {
-  pre: MarkdownCodeBlock,
-  code: MarkdownCode,
+  pre: MarkdownCodeBlock as Components['pre'],
+  code: MarkdownCode as Components['code'],
 }
 
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className }) => {
