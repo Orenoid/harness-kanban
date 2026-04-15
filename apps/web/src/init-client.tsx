@@ -246,7 +246,7 @@ registerPropertyRenderer(SystemPropertyId.PRIORITY, {
       propertyId: SystemPropertyId.PRIORITY,
       type: 'string',
       required: false,
-      defaultValue: 'no-priority',
+      defaultValue: 'medium',
     },
     display: {
       label: 'Priority',
