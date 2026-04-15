@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from 'react'
 
-import { TiptapEditor, TiptapEditorHandle } from '@/components/core/editor/tiptap-editor'
+import { MarkdownEditor, MarkdownEditorHandle } from '@/components/core/markdown-editor'
 import { Button } from '@/components/ui/button'
 import { useUploadBase64Image } from '@/hooks/use-upload-image'
 import { useCreateIssueComment } from '@/issue/hooks/use-create-issue-comment'
@@ -17,7 +17,7 @@ interface CommentFormViewProps {
   onContentChange: (content: string) => void
   onSubmit: () => void
   uploadImage: (base64: string) => Promise<string>
-  editorRef: React.Ref<TiptapEditorHandle>
+  editorRef: React.Ref<MarkdownEditorHandle>
 }
 
 export const CommentFormView: React.FC<CommentFormViewProps> = ({
@@ -30,12 +30,12 @@ export const CommentFormView: React.FC<CommentFormViewProps> = ({
 }) => {
   return (
     <div className="border-border bg-background relative rounded-sm border">
-      <TiptapEditor
+      <MarkdownEditor
         ref={editorRef}
         value={content}
         onUpdate={onContentChange}
         editable
-        placeholder="Write a comment..."
+        placeholder="Write a comment... Markdown syntax is supported"
         uploadImage={uploadImage}
         containerClassName="p-3 pb-12 min-h-[100px]"
         className="overflow-y-auto"
@@ -50,7 +50,7 @@ export const CommentFormView: React.FC<CommentFormViewProps> = ({
 }
 
 export const CommentForm: React.FC<CommentFormProps> = ({ issueId }) => {
-  const editorRef = useRef<TiptapEditorHandle>(null)
+  const editorRef = useRef<MarkdownEditorHandle>(null)
   const [content, setContent] = useState('')
   const { mutate: submitComment, isPending } = useCreateIssueComment(issueId)
 

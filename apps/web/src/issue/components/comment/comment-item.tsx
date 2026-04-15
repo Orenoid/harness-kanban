@@ -5,8 +5,8 @@ import { toast } from 'sonner'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 
 import { UserDisplay } from '@/components/common/user-display'
-import { TiptapEditor, TiptapEditorHandle } from '@/components/core/editor/tiptap-editor'
-import { TiptapViewer } from '@/components/core/editor/tiptap-viewer'
+import { MarkdownEditor, MarkdownEditorHandle } from '@/components/core/markdown-editor'
+import { MarkdownRenderer } from '@/components/core/markdown-renderer'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -24,9 +24,9 @@ import { Comment } from '@repo/shared/issue/types'
 import { formatRelativeDate } from '@repo/shared/lib/utils/datetime'
 import { CommentPropertyForm } from './comment-property/comment-property-form'
 import { CommentPropertyViewer } from './comment-property/comment-property-viewer'
-import { parseCommentContent, stringifyCommentContent } from './comment-property/parser'
+import { getCommentMarkdown, parseCommentContent, stringifyCommentContent } from './comment-property/parser'
 import { getCommentPropertiesByData, getCommentTheme, getDisplayCommentProperties } from './comment-property/registry'
-import { CommentContent, CommentPropertyValueType } from './comment-property/types'
+import { CommentPropertyValueType } from './comment-property/types'
 
 interface CommentItemProps {
   comment: Comment
@@ -65,7 +65,7 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
   const [displayContent, setDisplayContent] = useState(comment.content)
   const [propertyValues, setPropertyValues] = useState<Record<string, CommentPropertyValueType>>({})
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const editorRef = useRef<TiptapEditorHandle>(null)
+  const editorRef = useRef<MarkdownEditorHandle>(null)
 
   const parsedContent = parseCommentContent(displayContent)
   const commentProperties = useMemo(() => {
@@ -77,7 +77,7 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
   const handleEdit = () => {
     const parsed = parseCommentContent(comment.content)
     setIsEditing(true)
-    setEditContent(comment.content)
+    setEditContent(getCommentMarkdown(parsed))
     setPropertyValues(parsed.attr?.data || {})
   }
 
@@ -93,9 +93,9 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
     if (!editorValue?.trim() && Object.keys(propertyValues).length === 0) return
 
     try {
-      let newContent: CommentContent
+      let newContent: { content?: string; attr?: { data: Record<string, CommentPropertyValueType> } }
 
-      const originalData = parsedContent.attr?.data || {}
+      const originalData = parseCommentContent(comment.content).attr?.data || {}
       const readonlyData: Record<string, CommentPropertyValueType> = {}
 
       const allProperties = getCommentPropertiesByData(originalData)
@@ -108,10 +108,12 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
       const finalData = { ...readonlyData, ...propertyValues }
 
       if (editorValue) {
-        const editorContent = JSON.parse(editorValue) as CommentContent
-        newContent = Object.keys(finalData).length > 0 ? { ...editorContent, attr: { data: finalData } } : editorContent
+        newContent =
+          Object.keys(finalData).length > 0
+            ? { content: editorValue, attr: { data: finalData } }
+            : { content: editorValue }
       } else {
-        newContent = { type: 'doc', content: [], attr: { data: finalData } }
+        newContent = { content: '', attr: { data: finalData } }
       }
 
       const contentString = stringifyCommentContent(newContent)
@@ -137,8 +139,9 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
 
   const handleCancel = () => {
     setIsEditing(false)
-    setEditContent(comment.content)
-    setPropertyValues(parseCommentContent(comment.content).attr?.data || {})
+    const parsed = parseCommentContent(comment.content)
+    setEditContent(getCommentMarkdown(parsed))
+    setPropertyValues(parsed.attr?.data || {})
   }
 
   const handleDelete = () => {
@@ -221,12 +224,14 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
 
   useEffect(() => {
     if (!isEditing) {
-      setEditContent(comment.content)
-      setDisplayContent(comment.content)
       const parsed = parseCommentContent(comment.content)
+      setEditContent(getCommentMarkdown(parsed))
+      setDisplayContent(comment.content)
       setPropertyValues(parsed.attr?.data || {})
     }
   }, [comment.content, isEditing])
+
+  const displayMarkdown = getCommentMarkdown(parsedContent)
 
   return (
     <div className={cn('group relative rounded-sm border p-3', theme?.container || 'bg-background dark:bg-accent/50')}>
@@ -253,12 +258,12 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
         {isEditing ? (
           <div className="bg-background dark:bg-accent/50 relative rounded-sm border">
             {renderEditingProperties()}
-            <TiptapEditor
+            <MarkdownEditor
               ref={editorRef}
               defaultValue={editContent}
               updateMode="manual"
               editable
-              placeholder="Edit your comment..."
+              placeholder="Edit your comment... Markdown syntax is supported"
               uploadImage={uploadImage}
               containerClassName="p-3 pb-12 min-h-[80px]"
               className="overflow-y-auto"
@@ -275,7 +280,7 @@ export const CommentItemView: React.FC<CommentItemViewProps> = ({
         ) : (
           <>
             <div className="min-h-16">
-              <TiptapViewer content={displayContent} />
+              <MarkdownRenderer content={displayMarkdown} />
             </div>
             {renderProperties()}
             <h3 className={cn(theme?.text, 'absolute bottom-3 right-3 text-3xl font-bold opacity-40')}>

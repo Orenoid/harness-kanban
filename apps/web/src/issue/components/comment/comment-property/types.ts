@@ -71,7 +71,9 @@ export interface CommentThemeConfig {
   theme: CommentTheme
 }
 
-export interface CommentContent extends JSONContent {
+export interface CommentContent {
+  type?: string
+  content?: JSONContent[] | string
   attr?: {
     data: Record<string, CommentPropertyValueType>
   }

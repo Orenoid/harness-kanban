@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AnimatedTabs } from '@/components/common/animated-tabs'
-import { TiptapEditor, TiptapEditorHandle } from '@/components/core/editor/tiptap-editor'
+import { MarkdownEditor, MarkdownEditorHandle } from '@/components/core/markdown-editor'
 import { Button } from '@/components/ui/button'
 import { useUploadBase64Image } from '@/hooks/use-upload-image'
 import { useCreateIssueComment } from '@/issue/hooks/use-create-issue-comment'
@@ -28,7 +28,7 @@ export const EnhancedCommentFormView: React.FC<EnhancedCommentFormViewProps> = (
   const [propertyValues, setPropertyValues] = useState<Record<string, CommentPropertyValueType>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [validationErrors, setValidationErrors] = useState<Record<string, boolean>>({})
-  const editorRef = useRef<TiptapEditorHandle>(null)
+  const editorRef = useRef<MarkdownEditorHandle>(null)
 
   const { tabItems, activeTabItem } = useMemo(() => {
     const tabGroups = getCommentTabGroups()
@@ -106,10 +106,11 @@ export const EnhancedCommentFormView: React.FC<EnhancedCommentFormViewProps> = (
       let commentContent: CommentContent
 
       if (editorValue) {
-        const editorContent = JSON.parse(editorValue) as CommentContent
-        commentContent = hasProperties ? { ...editorContent, attr: { data: propertyValues } } : editorContent
+        commentContent = hasProperties
+          ? { content: editorValue, attr: { data: propertyValues } }
+          : { content: editorValue }
       } else {
-        commentContent = { type: 'doc', content: [], attr: { data: propertyValues } }
+        commentContent = { content: '', attr: { data: propertyValues } }
       }
 
       await createComment(stringifyCommentContent(commentContent))
@@ -171,12 +172,12 @@ export const EnhancedCommentFormView: React.FC<EnhancedCommentFormViewProps> = (
       <AnimatedTabs tabs={tabItems} defaultTab="default" value={activeTab} onTabChange={setActiveTab}>
         <div className="relative mt-1 -translate-y-1 border border-t-0">
           {renderPropertyFields(activeTabItem?.propertyIds)}
-          <TiptapEditor
+          <MarkdownEditor
             ref={editorRef}
             defaultValue=""
             updateMode="manual"
             editable
-            placeholder="Write a comment..."
+            placeholder="Write a comment... Markdown syntax is supported"
             uploadImage={uploadImage}
             containerClassName="p-3 pb-12"
             className="overflow-y-auto"
