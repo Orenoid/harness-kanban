@@ -2,10 +2,11 @@
 
 import React, { useRef, useState } from 'react'
 
-import { TiptapEditor, TiptapEditorHandle } from '@/components/core/editor/tiptap-editor'
+import { focusMarkdownInputEnd, MarkdownInput } from '@/components/core/markdown'
 import { Button } from '@/components/ui/button'
-import { useUploadBase64Image } from '@/hooks/use-upload-image'
 import { useCreateIssueComment } from '@/issue/hooks/use-create-issue-comment'
+
+const COMMENT_PLACEHOLDER = 'Write a comment... Markdown syntax is supported.'
 
 interface CommentFormProps {
   issueId: number
@@ -16,8 +17,7 @@ interface CommentFormViewProps {
   isPending: boolean
   onContentChange: (content: string) => void
   onSubmit: () => void
-  uploadImage: (base64: string) => Promise<string>
-  editorRef: React.Ref<TiptapEditorHandle>
+  inputRef: React.Ref<HTMLTextAreaElement>
 }
 
 export const CommentFormView: React.FC<CommentFormViewProps> = ({
@@ -25,23 +25,19 @@ export const CommentFormView: React.FC<CommentFormViewProps> = ({
   isPending,
   onContentChange,
   onSubmit,
-  uploadImage,
-  editorRef,
+  inputRef,
 }) => {
   return (
     <div className="border-border bg-background relative rounded-sm border">
-      <TiptapEditor
-        ref={editorRef}
+      <MarkdownInput
+        ref={inputRef}
         value={content}
-        onUpdate={onContentChange}
-        editable
-        placeholder="Write a comment..."
-        uploadImage={uploadImage}
-        containerClassName="p-3 pb-12 min-h-[100px]"
-        className="overflow-y-auto"
+        onChange={onContentChange}
+        placeholder={COMMENT_PLACEHOLDER}
+        aria-label="Write a comment"
       />
       <div className="absolute bottom-3 right-3">
-        <Button variant="default" size="sm" onClick={onSubmit} disabled={isPending || !content?.trim()}>
+        <Button variant="default" size="sm" onClick={onSubmit} disabled={isPending || !content.trim()}>
           Comment
         </Button>
       </div>
@@ -50,22 +46,20 @@ export const CommentFormView: React.FC<CommentFormViewProps> = ({
 }
 
 export const CommentForm: React.FC<CommentFormProps> = ({ issueId }) => {
-  const editorRef = useRef<TiptapEditorHandle>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const [content, setContent] = useState('')
   const { mutate: submitComment, isPending } = useCreateIssueComment(issueId)
 
-  const { mutateAsync } = useUploadBase64Image()
-  const uploadImage = async (base64: string): Promise<string> => {
-    const result = await mutateAsync(base64)
-    return result.url
-  }
-
   const handleSubmit = () => {
-    if (!content?.trim()) return
-    submitComment(content, {
+    const markdown = content.trim()
+    if (!markdown) return
+
+    submitComment(markdown, {
       onSuccess: () => {
         setContent('')
-        editorRef.current?.focusEnd()
+        setTimeout(() => {
+          focusMarkdownInputEnd(inputRef.current)
+        }, 0)
       },
     })
   }
@@ -76,8 +70,7 @@ export const CommentForm: React.FC<CommentFormProps> = ({ issueId }) => {
       isPending={isPending}
       onContentChange={setContent}
       onSubmit={handleSubmit}
-      uploadImage={uploadImage}
-      editorRef={editorRef}
+      inputRef={inputRef}
     />
   )
 }

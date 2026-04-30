@@ -64,6 +64,8 @@ export const CreateMode: Story = {
       throw new Error('Expected project form controls to render.')
     }
 
+    await waitForCondition(() => !repoField.disabled)
+
     await userEvent.type(nameField, 'Project Gamma')
     await userEvent.click(repoField)
 
