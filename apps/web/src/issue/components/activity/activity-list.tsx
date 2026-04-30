@@ -10,6 +10,7 @@ import { ActivityItem } from './activity-item'
 
 interface ActivityListProps {
   issueId: number
+  showHeader?: boolean
 }
 
 interface ActivityListViewProps extends ActivityListProps {
@@ -17,7 +18,7 @@ interface ActivityListViewProps extends ActivityListProps {
   isLoading: boolean
 }
 
-export const ActivityListView: React.FC<ActivityListViewProps> = ({ activities, isLoading }) => {
+export const ActivityListView: React.FC<ActivityListViewProps> = ({ activities, isLoading, showHeader = true }) => {
   const sortedActivities = useMemo(() => {
     return [...activities].sort((a, b) => {
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -31,10 +32,14 @@ export const ActivityListView: React.FC<ActivityListViewProps> = ({ activities, 
   if (isLoading) return null
 
   return (
-    <div className="mt-6 px-0 py-2">
-      <LayoutSlot className="mb-2 flex items-center justify-between px-2">
-        <LayoutSlot className="shrink-0 text-lg font-medium">Activity</LayoutSlot>
-      </LayoutSlot>
+    <div className={showHeader ? 'mt-6 px-0 py-2' : 'px-0 py-2'}>
+      {showHeader ? (
+        <LayoutSlot className="mb-2 flex items-center justify-between px-2">
+          <LayoutSlot data-activity-list-header className="shrink-0 text-lg font-medium">
+            Activity
+          </LayoutSlot>
+        </LayoutSlot>
+      ) : null}
       <div className="space-y-4">
         {displayedActivities.map(activity => (
           <ActivityItem key={activity.id} activity={activity} />
@@ -44,8 +49,15 @@ export const ActivityListView: React.FC<ActivityListViewProps> = ({ activities, 
   )
 }
 
-export const ActivityList: React.FC<ActivityListProps> = ({ issueId }) => {
+export const ActivityList: React.FC<ActivityListProps> = ({ issueId, showHeader }) => {
   const { data, isLoading } = useIssueActivities(issueId)
 
-  return <ActivityListView issueId={issueId} activities={data?.activities ?? []} isLoading={isLoading || !data} />
+  return (
+    <ActivityListView
+      issueId={issueId}
+      activities={data?.activities ?? []}
+      isLoading={isLoading || !data}
+      showHeader={showHeader}
+    />
+  )
 }

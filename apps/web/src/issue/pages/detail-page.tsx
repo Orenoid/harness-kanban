@@ -144,9 +144,19 @@ export const DetailPageView: React.FC<DetailPageViewProps> = ({
             })}
 
             <div className="mt-6 px-0">
-              <EnhancedCommentForm issueId={issueId} />
+              <section aria-labelledby="issue-activity-title">
+                <div className="border-border flex border-b">
+                  <h2
+                    id="issue-activity-title"
+                    data-activity-section-title
+                    className="border-foreground -mb-px border-b-2 px-4 py-2 text-sm font-semibold">
+                    Activity
+                  </h2>
+                </div>
+                <EnhancedCommentForm issueId={issueId} />
+              </section>
               <div className="mb-10 mt-4">
-                <ActivityList issueId={issueId} />
+                <ActivityList issueId={issueId} showHeader={false} />
               </div>
             </div>
           </div>

@@ -90,10 +90,12 @@ const createAssigneeActivity = (id: string, minutes: number, createdBy: string, 
   },
 })
 
+const markdownComment = (paragraphs: string[]) => paragraphs.join('\n\n')
+
 const createComment = (id: string, minutes: number, createdBy: string, paragraphs: string[]): Comment => ({
   id,
   issueId,
-  content: tiptapDoc(paragraphs),
+  content: markdownComment(paragraphs),
   createdBy,
   parentId: null,
   createdAt: baseTime + minutes * 60 * 1000,
@@ -102,8 +104,15 @@ const createComment = (id: string, minutes: number, createdBy: string, paragraph
 })
 
 const planComment = createComment('comment-plan', 12, 'code-bot', [
-  workerPullRequestUrl,
-  'Planning workflow complete: opened a draft PR for review, inspected auth config loading, added a workspace-scoped rotation service to the plan, and kept the worker provider interface unchanged. Proposed validation: pnpm type-check, pnpm test, pnpm build.',
+  `Opened a draft PR for review: ${workerPullRequestUrl}`,
+  [
+    'Planning workflow complete:',
+    '- inspected auth config loading',
+    '- added a workspace-scoped rotation service to the plan',
+    '- kept the worker provider interface unchanged',
+    '',
+    'Proposed validation: `pnpm type-check`, `pnpm test`, `pnpm build`.',
+  ].join('\n'),
 ])
 
 const planChangeRequestComment = createComment('comment-plan-change-request', 18, 'user-2', [
@@ -111,7 +120,7 @@ const planChangeRequestComment = createComment('comment-plan-change-request', 18
 ])
 
 const revisedPlanComment = createComment('comment-revised-plan', 23, 'code-bot', [
-  workerPullRequestUrl,
+  `Updated PR: ${workerPullRequestUrl}`,
   'Updated the plan to include the PR review comments and the issue feedback: token refresh stays scoped to checkout, the audit log records the triggering user, and queued workers keep their current token until the next checkout.',
 ])
 
@@ -120,8 +129,16 @@ const planReviewComment = createComment('comment-plan-review', 29, 'user-2', [
 ])
 
 const implementationComment = createComment('comment-implementation', 42, 'code-bot', [
-  workerPullRequestUrl,
-  'Implementation workflow complete: added rotation API, persisted audit records, updated worker checkout token refresh, and added service/unit coverage. Validation passed: pnpm type-check, pnpm test, pnpm build.',
+  `Implementation PR: ${workerPullRequestUrl}`,
+  [
+    'Implementation workflow complete:',
+    '- added rotation API',
+    '- persisted audit records',
+    '- updated worker checkout token refresh',
+    '- added service/unit coverage',
+    '',
+    'Validation passed: `pnpm type-check`, `pnpm test`, `pnpm build`.',
+  ].join('\n'),
 ])
 
 const reviewComment = createComment('comment-review', 49, 'user-2', [
@@ -320,5 +337,39 @@ export const HarnessWorkerWorkflow: Story = {
     await waitForCondition(() => canvasElement.textContent?.includes('CodeBot') ?? false)
     await waitForCondition(() => canvasElement.textContent?.includes('Validation passed') ?? false)
     await waitForCondition(() => canvasElement.textContent?.includes('Completed') ?? false)
+    await waitForCondition(() => Boolean(canvasElement.querySelector('textarea[aria-label="Write a comment"]')))
+    await waitForCondition(
+      () => canvasElement.querySelector('[data-activity-section-title]')?.textContent === 'Activity',
+    )
+
+    if (canvasElement.querySelector('.markdown-editor')) {
+      throw new Error('Comment composer should use the plain markdown input.')
+    }
+
+    if (canvasElement.querySelector('[data-activity-list-header]')) {
+      throw new Error('Activity list should not render a second Activity header.')
+    }
+
+    const activitySection = canvasElement.querySelector('section[aria-labelledby="issue-activity-title"]')
+    if (!activitySection) {
+      throw new Error('Expected activity composer section to render.')
+    }
+
+    if (getComputedStyle(activitySection).borderTopWidth !== '0px') {
+      throw new Error('Activity composer section should not render an outer box.')
+    }
+
+    const commentItem = canvasElement.querySelector('[data-comment-item]')
+    if (!commentItem) {
+      throw new Error('Expected rendered comment item to appear in the activity list.')
+    }
+
+    if (getComputedStyle(commentItem).borderTopWidth !== '0px') {
+      throw new Error('Rendered comment item should not render a card border.')
+    }
+
+    if (getComputedStyle(commentItem).backgroundColor === 'rgba(0, 0, 0, 0)') {
+      throw new Error('Rendered comment item should use a subtle background.')
+    }
   },
 }

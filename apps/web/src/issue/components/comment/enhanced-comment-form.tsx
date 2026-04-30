@@ -2,124 +2,52 @@
 
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 
-import { AnimatedTabs } from '@/components/common/animated-tabs'
-import { TiptapEditor, TiptapEditorHandle } from '@/components/core/editor/tiptap-editor'
+import { focusMarkdownInputEnd, MarkdownInput } from '@/components/core/markdown'
 import { Button } from '@/components/ui/button'
-import { useUploadBase64Image } from '@/hooks/use-upload-image'
 import { useCreateIssueComment } from '@/issue/hooks/use-create-issue-comment'
-import { CommentPropertyForm } from './comment-property/comment-property-form'
-import { stringifyCommentContent } from './comment-property/parser'
-import { getCommentProperty, getCommentTabGroups } from './comment-property/registry'
-import { CommentContent, CommentPropertyValueType } from './comment-property/types'
+import { cn } from '@/lib/shadcn/utils'
+
+const COMMENT_PLACEHOLDER = 'Write a comment... Markdown syntax is supported.'
 
 interface EnhancedCommentFormProps {
   issueId: number
+  className?: string
 }
 
 interface EnhancedCommentFormViewProps {
   createComment: (content: string) => Promise<unknown>
-  uploadImage: (base64: string) => Promise<string>
+  className?: string
 }
 
-export const EnhancedCommentFormView: React.FC<EnhancedCommentFormViewProps> = ({ createComment, uploadImage }) => {
-  const [activeTab, setActiveTab] = useState('default')
-  const [propertyValues, setPropertyValues] = useState<Record<string, CommentPropertyValueType>>({})
+export const EnhancedCommentFormView: React.FC<EnhancedCommentFormViewProps> = ({ createComment, className }) => {
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [content, setContent] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [validationErrors, setValidationErrors] = useState<Record<string, boolean>>({})
-  const editorRef = useRef<TiptapEditorHandle>(null)
-
-  const { tabItems, activeTabItem } = useMemo(() => {
-    const tabGroups = getCommentTabGroups()
-    const primaryTabGroup = tabGroups[0]
-    const tabsData = primaryTabGroup?.tabs || [{ id: 'default', label: 'Default', propertyIds: [] }]
-
-    return {
-      tabItems: tabsData.map(tab => ({ label: tab.label, value: tab.id })),
-      activeTabItem: tabsData.find(tab => tab.id === activeTab),
-    }
-  }, [activeTab])
-
-  const validateRequiredFields = useCallback(() => {
-    if (!activeTabItem?.propertyIds) return { isValid: true, errors: {} }
-
-    const activeProperties = activeTabItem.propertyIds.map(id => getCommentProperty(id)).filter(Boolean)
-
-    const errors: Record<string, boolean> = {}
-    let isValid = true
-
-    for (const property of activeProperties) {
-      if (property?.meta.required && !property.meta.readonly) {
-        const value = propertyValues[property.id]
-        if (value === undefined || value === null || value === '') {
-          errors[property.id] = true
-          isValid = false
-        }
-      }
-    }
-    return { isValid, errors }
-  }, [activeTabItem?.propertyIds, propertyValues])
-
-  const handlePropertyChange = (propertyId: string, value: CommentPropertyValueType) => {
-    setPropertyValues(prev => ({
-      ...prev,
-      [propertyId]: value,
-    }))
-    if (validationErrors[propertyId]) {
-      setValidationErrors(prev => {
-        const newErrors = { ...prev }
-        delete newErrors[propertyId]
-        return newErrors
-      })
-    }
-  }
 
   const resetForm = () => {
-    editorRef.current?.clear()
-    setPropertyValues({})
-    setValidationErrors({})
-    editorRef.current?.focusEnd()
-    setActiveTab('default')
+    setContent('')
+
+    setTimeout(() => {
+      focusMarkdownInputEnd(inputRef.current)
+    }, 0)
   }
 
   const handleSubmit = async () => {
-    const editorValue = editorRef.current?.getValue()
-    const hasProperties = Object.keys(propertyValues).length > 0
+    const markdown = content.trim()
 
-    if (!editorValue?.trim() && !hasProperties) {
+    if (!markdown) {
       toast.error('Please write a comment')
       return
     }
     if (isSubmitting) return
 
-    const validation = validateRequiredFields()
-    if (!validation.isValid) {
-      setValidationErrors(validation.errors)
-      toast.error('Please fill in all required fields')
-      return
-    }
-    setValidationErrors({})
-
     setIsSubmitting(true)
     try {
-      let commentContent: CommentContent
-
-      if (editorValue) {
-        const editorContent = JSON.parse(editorValue) as CommentContent
-        commentContent = hasProperties ? { ...editorContent, attr: { data: propertyValues } } : editorContent
-      } else {
-        commentContent = { type: 'doc', content: [], attr: { data: propertyValues } }
-      }
-
-      await createComment(stringifyCommentContent(commentContent))
-
+      await createComment(markdown)
       toast.success('Comment added successfully')
       resetForm()
-
-      setTimeout(() => {
-        editorRef.current?.focusEnd()
-      }, 100)
     } catch (error) {
       console.error('Failed to create comment:', error)
       toast.error('Failed to create comment. Please try again.')
@@ -128,85 +56,35 @@ export const EnhancedCommentFormView: React.FC<EnhancedCommentFormViewProps> = (
     }
   }
 
-  const renderPropertyFields = (propertyIds?: string[]) => {
-    if (!propertyIds || propertyIds.length === 0) return null
-
-    const filteredPropertyIds = propertyIds.filter(id => {
-      const property = getCommentProperty(id)
-      return !property?.meta.readonly
-    })
-    const properties = filteredPropertyIds.map(id => getCommentProperty(id)).filter(Boolean)
-
-    if (properties.length === 0) return null
-
-    return (
-      <div className="bg-accent/50 border-b p-4">
-        <div className="flex gap-4">
-          {properties.map(property => (
-            <div key={property!.id} className="flex-1">
-              <CommentPropertyForm
-                property={property!}
-                value={propertyValues[property!.id]}
-                onChange={value => handlePropertyChange(property!.id, value)}
-                hasError={validationErrors[property!.id]}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  useEffect(() => {
-    if (activeTab !== 'default' && activeTabItem?.defaultValues) {
-      setPropertyValues(prev => ({
-        ...prev,
-        ...activeTabItem.defaultValues,
-      }))
-    }
-  }, [activeTab, activeTabItem])
-
   return (
-    <div className="w-full">
-      <AnimatedTabs tabs={tabItems} defaultTab="default" value={activeTab} onTabChange={setActiveTab}>
-        <div className="relative mt-1 -translate-y-1 border border-t-0">
-          {renderPropertyFields(activeTabItem?.propertyIds)}
-          <TiptapEditor
-            ref={editorRef}
-            defaultValue=""
-            updateMode="manual"
-            editable
-            placeholder="Write a comment..."
-            uploadImage={uploadImage}
-            containerClassName="p-3 pb-12"
-            className="overflow-y-auto"
-          />
-          <div className="absolute bottom-3 right-3">
-            <Button size="sm" onClick={handleSubmit} disabled={isSubmitting}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Submitting...
-                </>
-              ) : (
-                'Submit'
-              )}
-            </Button>
-          </div>
-        </div>
-      </AnimatedTabs>
+    <div className={cn('border-border bg-background relative rounded-sm border', className)}>
+      <MarkdownInput
+        ref={inputRef}
+        value={content}
+        onChange={setContent}
+        placeholder={COMMENT_PLACEHOLDER}
+        aria-label="Write a comment"
+        autoFocus
+        className="min-h-[120px]"
+      />
+      <div className="absolute bottom-3 right-3">
+        <Button size="sm" onClick={handleSubmit} disabled={isSubmitting || !content.trim()}>
+          {isSubmitting ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Submitting...
+            </>
+          ) : (
+            'Submit'
+          )}
+        </Button>
+      </div>
     </div>
   )
 }
 
-export const EnhancedCommentForm: React.FC<EnhancedCommentFormProps> = ({ issueId }) => {
-  const { mutateAsync: uploadBase64Image } = useUploadBase64Image()
+export const EnhancedCommentForm: React.FC<EnhancedCommentFormProps> = ({ issueId, className }) => {
   const { mutateAsync: createComment } = useCreateIssueComment(issueId)
 
-  const handleUploadImage = async (base64: string): Promise<string> => {
-    const result = await uploadBase64Image(base64)
-    return result.url
-  }
-
-  return <EnhancedCommentFormView createComment={createComment} uploadImage={handleUploadImage} />
+  return <EnhancedCommentFormView createComment={createComment} className={className} />
 }
