@@ -5,14 +5,10 @@ import {
   CodingAgentDetail,
   CodingAgentManagementDetail,
   CodingAgentType,
-  CreateClaudeCodeCodingAgentManagementSettings,
   createClaudeCodeCodingAgentManagementSettingsSchema,
-  CreateCodexCodingAgentManagementSettings,
   createCodexCodingAgentManagementSettingsSchema,
   CreateCodingAgentInput,
-  UpdateClaudeCodeCodingAgentManagementSettings,
   updateClaudeCodeCodingAgentManagementSettingsSchema,
-  UpdateCodexCodingAgentManagementSettings,
   updateCodexCodingAgentManagementSettingsSchema,
   UpdateCodingAgentInput,
 } from '@repo/shared'
@@ -60,7 +56,7 @@ export class CodingAgentManagementRegistry {
       }
     }
 
-    throw new BadRequestException(`Coding agent type "${codingAgent.type}" is not configurable.`)
+    throw new BadRequestException(`Coding agent type "${String(codingAgent.type)}" is not configurable.`)
   }
 
   toCreateInput(payload: CreateManagementPayload): CreateCodingAgentInput {
@@ -69,7 +65,7 @@ export class CodingAgentManagementRegistry {
         createCodexCodingAgentManagementSettingsSchema,
         payload.settings,
         payload.type,
-      ) as CreateCodexCodingAgentManagementSettings
+      )
 
       return {
         name: payload.name,
@@ -89,7 +85,7 @@ export class CodingAgentManagementRegistry {
         createClaudeCodeCodingAgentManagementSettingsSchema,
         payload.settings,
         payload.type,
-      ) as CreateClaudeCodeCodingAgentManagementSettings
+      )
 
       return {
         name: payload.name,
@@ -103,7 +99,7 @@ export class CodingAgentManagementRegistry {
       }
     }
 
-    throw new BadRequestException(`Coding agent type "${payload.type}" is not configurable.`)
+    throw new BadRequestException(`Coding agent type "${String(payload.type)}" is not configurable.`)
   }
 
   toUpdateInput(existingCodingAgent: CodingAgentDetail, payload: UpdateManagementPayload): UpdateCodingAgentInput {
@@ -123,7 +119,7 @@ export class CodingAgentManagementRegistry {
           updateCodexCodingAgentManagementSettingsSchema,
           payload.settings,
           existingCodingAgent.type,
-        ) as UpdateCodexCodingAgentManagementSettings
+        )
         const existingSettings = existingCodingAgent.settings as CodexCodingAgentSettings
         const trimmedApiKey = inputSettings.apiKey?.trim()
 
@@ -156,7 +152,7 @@ export class CodingAgentManagementRegistry {
           updateClaudeCodeCodingAgentManagementSettingsSchema,
           payload.settings,
           existingCodingAgent.type,
-        ) as UpdateClaudeCodeCodingAgentManagementSettings
+        )
         const existingSettings = existingCodingAgent.settings as ClaudeCodeCodingAgentSettings
         const trimmedApiKey = inputSettings.apiKey?.trim()
 
@@ -169,7 +165,7 @@ export class CodingAgentManagementRegistry {
         return nextInput
       }
 
-      throw new BadRequestException(`Coding agent type "${existingCodingAgent.type}" is not configurable.`)
+      throw new BadRequestException(`Coding agent type "${String(existingCodingAgent.type)}" is not configurable.`)
     }
 
     return nextInput

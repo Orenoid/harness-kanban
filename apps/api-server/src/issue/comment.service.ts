@@ -1,7 +1,6 @@
 import { PrismaService } from '@/database/prisma.service'
 import { ISSUE_EVENTS } from '@/event-bus/constants/event.constants'
 import { emit, emitInTx } from '@/event-bus/event-bus'
-import { CommentCreatedEvent } from '@/event-bus/types/event.types'
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import { EventEmitter2 } from '@nestjs/event-emitter'
 import { DEFAULT_WORKSPACE_ID } from '@repo/shared/constants'

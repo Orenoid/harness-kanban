@@ -59,6 +59,12 @@
     "MINIO_*",
     "RUNTIME_*",
     "RUNTIME_API_BASE_URL",
-    "RUNTIME_SOCKET_SERVER_URL"
+    "RUNTIME_SOCKET_SERVER_URL",
+    "NEXT_DIST_MODE",
+    "CI",
+    "PATH",
+    "HOME",
+    "DEVPOD_HOME",
+    "XDG_CACHE_HOME"
   ]
 }

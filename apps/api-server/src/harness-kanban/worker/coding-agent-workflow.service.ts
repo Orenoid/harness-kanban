@@ -1745,6 +1745,6 @@ export class HarnessWorkerCodingAgentWorkflowService {
   }
 
   private quoteShellArg(value: string): string {
-    return `'${value.replace(/'/g, `'\"'\"'`)}'`
+    return `'${value.replace(/'/g, `'"'"'`)}'`
   }
 }

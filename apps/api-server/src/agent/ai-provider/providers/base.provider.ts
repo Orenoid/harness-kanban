@@ -15,7 +15,7 @@ export abstract class BaseAIProvider implements AIProvider {
     try {
       const module = await import(this.packageName)
       return module as T
-    } catch (error) {
+    } catch {
       throw new Error(
         `Failed to import ${this.name} provider package "${this.packageName}". ` +
           `Please install it with: pnpm add ${this.packageName}`,

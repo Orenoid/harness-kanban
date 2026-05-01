@@ -20,6 +20,12 @@ interface UpdateIssueMutationInput {
   operations: Operation[]
 }
 
+interface UseUpdateIssueResult {
+  updateIssue: (input: { operations: Operation[] }) => Promise<null>
+  error: Error | null
+  isMutating: boolean
+}
+
 export const useUpdateIssueMutation = () => {
   const apiClient = useApiServerClient()
   const queryClient = useQueryClient()
@@ -53,7 +59,7 @@ export const useUpdateIssueMutation = () => {
   }
 }
 
-export const useUpdateIssue = (issueId: number): any => {
+export const useUpdateIssue = (issueId: number): UseUpdateIssueResult => {
   const mutation = useUpdateIssueMutation()
 
   return {

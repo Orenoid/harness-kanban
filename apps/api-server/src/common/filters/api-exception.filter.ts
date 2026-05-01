@@ -32,7 +32,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
 
     if (exception instanceof Error) {
-      return this.handleGenericError(exception)
+      return this.handleGenericError()
     }
 
     return this.handleUnknownException()
@@ -81,7 +81,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     }
   }
 
-  private handleGenericError(error: Error): ExceptionContext {
+  private handleGenericError(): ExceptionContext {
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       error: {

@@ -23,7 +23,7 @@ export const getActivityBehavior = (propertyId: string): ActivityBehavior | unde
 }
 
 export const shouldDisplayActivity = (activity: Activity): boolean => {
-  const propertyId = (activity.payload as any)?.propertyId
+  const propertyId = 'propertyId' in activity.payload ? activity.payload.propertyId : undefined
   if (!propertyId) return true
 
   const behavior = getActivityBehavior(propertyId)

@@ -91,7 +91,7 @@ export const GlobalLoading = ({ text = 'Loading', className }: { text?: string; 
           </div>
         </div>
       </div>
-      <style jsx global>{`
+      <style>{`
         @keyframes spin {
           to {
             transform: rotate(360deg);

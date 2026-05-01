@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-export default function middleware(req: Request) {
+export default function middleware(_req: Request) {
   return NextResponse.next()
 }
 

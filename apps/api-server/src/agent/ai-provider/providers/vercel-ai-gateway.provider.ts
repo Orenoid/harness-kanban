@@ -9,7 +9,7 @@ export class VercelAIGatewayProvider extends BaseAIProvider {
   readonly packageName = 'ai'
   readonly defaultModel = 'openai/gpt-4o-mini'
 
-  validateConfig(config: ProviderConfig): void {
+  validateConfig(): void {
     // Vercel AI Gateway can work without explicit URL (uses default)
   }
 

@@ -24,6 +24,14 @@ export default tseslint.config(
   },
   ...nextJsConfig,
   {
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     ignores: ['src/types/*.d.ts', '**/*.test.ts', '**/*.spec.ts', 'src/test-setup.ts'],
     languageOptions: {

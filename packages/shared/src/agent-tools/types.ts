@@ -147,14 +147,14 @@ export interface CreateCommentInput {
   parentId?: string
 }
 
-export interface CreateCommentOutput extends CommentOutput {}
+export type CreateCommentOutput = CommentOutput
 
 export interface UpdateCommentInput {
   commentId: string
   content: string
 }
 
-export interface UpdateCommentOutput extends CommentOutput {}
+export type UpdateCommentOutput = CommentOutput
 
 export interface DeleteCommentInput {
   commentId: string
@@ -199,9 +199,7 @@ export interface RemoveSubscriberOutput {
 // User Tools
 // ============================================
 
-export interface GetAvailableUsersInput {
-  // No input required
-}
+export type GetAvailableUsersInput = Record<string, never>
 
 export interface GetAvailableUsersOutput {
   id: string
@@ -209,9 +207,7 @@ export interface GetAvailableUsersOutput {
   email: string
 }
 
-export interface GetCurrentUserInput {
-  // No input required
-}
+export type GetCurrentUserInput = Record<string, never>
 
 export interface GetCurrentUserOutput {
   id: string
@@ -229,9 +225,7 @@ export interface TodoItem {
   updatedAt: string
 }
 
-export interface ListTodosInput {
-  // No input required
-}
+export type ListTodosInput = Record<string, never>
 
 export interface ListTodosOutput {
   items: TodoItem[]

@@ -4,7 +4,7 @@ declare global {
   namespace Express {
     interface Request {
       user?: IssueUser | undefined
-      organization?: any | undefined
+      organization?: unknown
     }
   }
 }

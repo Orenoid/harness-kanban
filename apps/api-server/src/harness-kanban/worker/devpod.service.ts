@@ -927,7 +927,7 @@ export class HarnessWorkerDevpodService {
   }
 
   private quoteShellArg(value: string): string {
-    return `'${value.replace(/'/g, `'\"'\"'`)}'`
+    return `'${value.replace(/'/g, `'"'"'`)}'`
   }
 
   private async executeCommand(file: string, args: string[], options: ExecFileOptions): Promise<DevpodCommandResult> {
@@ -936,7 +936,7 @@ export class HarnessWorkerDevpodService {
         if (error) {
           ;(error as Error & { stdout?: string; stderr?: string }).stdout = stdout
           ;(error as Error & { stdout?: string; stderr?: string }).stderr = stderr
-          reject(error)
+          reject(error instanceof Error ? error : new Error(String(error)))
           return
         }
 
