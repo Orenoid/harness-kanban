@@ -3,6 +3,7 @@ import { DatabaseModule } from '@/database/database.module'
 import { GithubModule } from '@/github/github.module'
 import { CodingAgentModule } from '@/harness-kanban/coding-agent/coding-agent.module'
 import { HarnessKanbanModule } from '@/harness-kanban/harness-kanban.module'
+import { WorkspaceVncProxyModule } from '@/harness-kanban/workspace-proxy/workspace-vnc-proxy.module'
 import { HealthModule } from '@/health/health.module'
 import { IssueModule } from '@/issue/issue.module'
 import { NotificationModule } from '@/notification/notification.module'
@@ -27,6 +28,7 @@ import { getAuth } from './auth/auth.js'
     CodingAgentModule,
     HealthModule,
     HarnessKanbanModule,
+    WorkspaceVncProxyModule,
     GithubModule,
     AuthModule,
     ProjectModule,

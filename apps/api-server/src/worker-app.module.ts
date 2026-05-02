@@ -11,6 +11,8 @@ import { HarnessWorkerClaudeCodeProvider } from '@/harness-kanban/worker/provide
 import { HarnessWorkerCodexProvider } from '@/harness-kanban/worker/providers/harness-worker-codex.provider'
 import { HarnessWorkerToolchainService } from '@/harness-kanban/worker/toolchain.service'
 import { WorkerService } from '@/harness-kanban/worker/worker.service'
+import { WorkspacePortForwardService } from '@/harness-kanban/worker/workspace-port-forward.service'
+import { WorkspaceProxyServerService } from '@/harness-kanban/worker/workspace-proxy-server.service'
 import { IssueModule } from '@/issue/issue.module'
 import { PgmqModule } from '@/pgmq/pgmq.module'
 import { ProjectModule } from '@/project/project.module'
@@ -45,6 +47,8 @@ import { EventEmitterModule } from '@nestjs/event-emitter'
     HarnessWorkerCodingAgentProviderRegistry,
     HarnessWorkerCodingAgentWorkflowService,
     HarnessWorkerGithubService,
+    WorkspacePortForwardService,
+    WorkspaceProxyServerService,
     WorkerService,
   ],
 })

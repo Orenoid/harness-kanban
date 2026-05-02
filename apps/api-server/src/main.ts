@@ -7,6 +7,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { TEST } from '@repo/shared/constants'
 // import { InitializationService } from './initialization/initialization.service'
 import { AppModule } from './app.module.js'
+import { WorkspaceVncProxyService } from './harness-kanban/workspace-proxy/workspace-vnc-proxy.service.js'
+import type { IncomingMessage } from 'node:http'
+import type { Socket } from 'node:net'
+import type { Request, Response } from 'express'
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false })
@@ -29,6 +33,22 @@ async function bootstrap() {
   })
 
   app.useGlobalFilters(new ApiExceptionFilter())
+  const workspaceVncProxyService = app.get(WorkspaceVncProxyService)
+  const httpAdapter = app.getHttpAdapter()
+  const expressApp = httpAdapter.getInstance()
+
+  expressApp.use('/api/v1/vnc', (req: Request, res: Response) => {
+    void workspaceVncProxyService.handleHttpRequest(req, res)
+  })
+
+  app.getHttpServer().on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
+    if (!workspaceVncProxyService.canHandleUrl(req.url)) {
+      return
+    }
+
+    void workspaceVncProxyService.handleUpgradeRequest(req, socket, head)
+  })
+
   logger.log(`Starting server on port ${port}`)
   logger.log(`APP_ENV=${appEnv} NODE_ENV=${nodeEnv}`)
 

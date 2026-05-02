@@ -86,6 +86,7 @@ model harness_worker {
   id              String   @id @default(uuid())
   issue_id        Int?
   devpod_metadata Json?
+  proxy_base_url  String?
   status          String
   created_at      DateTime @default(now())
   last_updated_at DateTime
