@@ -56,8 +56,8 @@ export const DetailPageView: React.FC<DetailPageViewProps> = ({
   const mainFields = [SystemPropertyId.TITLE, SystemPropertyId.DESCRIPTION]
 
   return (
-    <>
-      <div className="bg-background sticky top-0 z-30 w-full border-b">
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="bg-background sticky top-0 z-30 w-full shrink-0 border-b">
         <LayoutSlot className="container mx-auto flex h-[var(--navbar-height)] max-w-6xl items-center px-2 md:px-6">
           <LayoutSlot className="flex h-[var(--navbar-height)] flex-1 items-center">
             <IssuePageBreadcrumbs
@@ -72,8 +72,8 @@ export const DetailPageView: React.FC<DetailPageViewProps> = ({
         </LayoutSlot>
       </div>
 
-      <LayoutSlot className="container mx-auto max-w-6xl flex-1 px-2 py-4 md:px-6">
-        <div className="grid w-full auto-rows-min grid-cols-1 items-start gap-x-8 gap-y-4 md:grid-cols-10">
+      <LayoutSlot className="container mx-auto max-w-6xl flex-1 overflow-hidden px-2 py-4 md:px-6">
+        <div className="grid h-full w-full grid-cols-1 items-start gap-x-8 gap-y-4 md:grid-cols-10">
           <div className="order-1 md:order-2 md:col-span-2 md:border-l">
             {Object.entries(grouped).map(([groupTitle, groupFields]) => {
               const sidebarFields = groupFields.filter(f => !mainFields.includes(f.core.propertyId as SystemPropertyId))
@@ -127,7 +127,7 @@ export const DetailPageView: React.FC<DetailPageViewProps> = ({
             })}
           </div>
 
-          <div className="order-2 space-y-6 px-2 md:order-1 md:col-span-8">
+          <div className="scrollbar-hide order-2 h-full space-y-6 overflow-y-auto px-2 md:order-1 md:col-span-8">
             {mainFields.map(propertyId => {
               const field = fields.find(f => f.core.propertyId === propertyId)
               if (!field) return null
@@ -162,7 +162,7 @@ export const DetailPageView: React.FC<DetailPageViewProps> = ({
           </div>
         </div>
       </LayoutSlot>
-    </>
+    </div>
   )
 }
 
