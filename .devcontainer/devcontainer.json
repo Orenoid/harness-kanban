@@ -7,24 +7,6 @@
   "remoteUser": "node",
   "shutdownAction": "stopCompose",
   "postCreateCommand": "bash .devcontainer/scripts/setup-devcontainer.sh",
-  "forwardPorts": [3000, 3001, 3100, 3101, 6006],
-  "portsAttributes": {
-    "3000": {
-      "label": "Harness Kanban Web"
-    },
-    "3001": {
-      "label": "Harness Kanban API Server"
-    },
-    "3100": {
-      "label": "Workspace Browser GUI"
-    },
-    "3101": {
-      "label": "Workspace Browser GUI (HTTPS)"
-    },
-    "6006": {
-      "label": "Storybook"
-    }
-  },
   "mounts": [
     "source=${localWorkspaceFolderBasename}-node_modules,target=${containerWorkspaceFolder}/node_modules,type=volume"
   ]
