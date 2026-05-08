@@ -58,6 +58,26 @@ Collaborate with CodeBot like a real teammate.
 
 4. Create a project and a new issue, assign it to CodeBot, and you're on a roll.
 
+## Advanced
+
+### Dev Container Support
+
+Harness Kanban implements the open [Dev Containers](https://containers.dev/) specification to provision each agent's workspace. When a worker picks up an issue, it builds a container based on the target repo's `.devcontainer/devcontainer.json` (or `.devcontainer.json` at the repo root) on the issue's base branch. The agent then runs against the same toolchain, dependencies, and lifecycle scripts a human teammate would get when opening the repo in VSCode.
+
+Anything you can express in the spec — base image, [features](https://containers.dev/features), `postCreateCommand`, multi-service setups via `dockerComposeFile`, mounts, environment, etc. — is honored. Container provisioning is delegated to [DevPod](https://devpod.sh/) under the hood, so if your config works there, it works here.
+
+### Mount Performance
+
+Be careful with the `mounts` field in `devcontainer.json`. Bind mounts from the host (`type=bind`) traverse Docker Desktop's filesystem virtualization layer on macOS and Windows, and can be many times slower than the container's native filesystem. Pointing them at hot directories like `node_modules`, build caches, or database data dirs will quickly bottleneck installs, builds, and test runs — which directly starves the agent's iteration loop and bloats issue completion time.
+
+Prefer named Docker volumes (`type=volume`) for these paths, or leave them on the container filesystem entirely. As a reference, this repo's own [`devcontainer.json`](./.devcontainer/devcontainer.json) mounts a named volume over `node_modules` for exactly this reason.
+
+### Validate Your devcontainer.json First
+
+> **Strongly recommended:** before assigning issues to CodeBot in a new repository, open that repo with VSCode's [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) and verify the container builds, starts, and lets you run the repo's install / build / test commands end-to-end.
+
+The Harness Kanban worker exercises the same dev container code path as VSCode, but it runs unattended — there is no human to react to a stalled `postCreateCommand` or a missing build arg. VSCode is by far the fastest place to surface and iterate on these issues. A clean VSCode launch is the strongest single signal that the worker will be able to make progress on the repo.
+
 ## Architecture
 
 ![Harness Kanban architecture](./.github/images/readme-architecture.svg)
