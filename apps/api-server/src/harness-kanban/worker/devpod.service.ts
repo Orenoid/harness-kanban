@@ -20,7 +20,7 @@ import {
 import { SystemPropertyId } from '@repo/shared/property/constants'
 import { HarnessWorkerCodingAgentProviderRegistry } from './providers/coding-agent-provider.registry'
 import { DevpodCommandResult, WorkspaceCommandOptions } from './providers/coding-agent-provider.types'
-import type { ExecFileOptions } from 'node:child_process'
+import type { ChildProcess, ExecFileOptions } from 'node:child_process'
 import type { HarnessWorkerToolchainArtifact, HarnessWorkerToolchainPlatform } from './toolchain.service'
 
 type IssueProjectRepository = {
@@ -130,6 +130,16 @@ type HarnessWorkerDevpodMetadata = {
       }
     }
   }
+}
+
+export type WorkspacePortForwardHandle = {
+  workspaceName: string
+  localPort: number
+  targetPort: number
+  child: ChildProcess
+  getStderr: () => string
+  isExited: () => boolean
+  stop: () => Promise<void>
 }
 
 const DEFAULT_DEVPOD_FALLBACK_IMAGE = 'mcr.microsoft.com/devcontainers/base:ubuntu'
@@ -308,6 +318,83 @@ export class HarnessWorkerDevpodService {
       this.logger.log(`Deleted DevPod workspace ${workspaceName}`)
     } finally {
       await this.cleanupDockerConfigDirectory(dockerConfigDirectory)
+    }
+  }
+
+  async startWorkspacePortForward(
+    workspaceName: string,
+    localPort: number,
+    targetPort: number,
+  ): Promise<WorkspacePortForwardHandle> {
+    const dockerConfigDirectory = await this.prepareDockerConfigDirectory()
+    const env = this.buildDevpodEnv(dockerConfigDirectory.path)
+    const args = ['ssh', workspaceName, '--forward-ports', `127.0.0.1:${localPort}:localhost:${targetPort}`]
+    const child = spawn('devpod', args, {
+      env,
+      shell: false,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
+    let stderr = ''
+    let spawnError: Error | null = null
+    let cleanedUp = false
+    const cleanup = async () => {
+      if (cleanedUp) {
+        return
+      }
+      cleanedUp = true
+      await this.cleanupDockerConfigDirectory(dockerConfigDirectory)
+    }
+
+    child.stderr?.on('data', chunk => {
+      stderr += chunk.toString()
+      if (stderr.length > 8192) {
+        stderr = stderr.slice(-8192)
+      }
+    })
+    child.once('exit', () => {
+      void cleanup().catch(error => {
+        const message = error instanceof Error ? error.message : String(error)
+        this.logger.warn(`Failed to cleanup DevPod port-forward resources for ${workspaceName}: ${message}`)
+      })
+    })
+    child.once('error', error => {
+      spawnError = error
+      stderr += error.message
+      void cleanup().catch(cleanupError => {
+        const message = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        this.logger.warn(`Failed to cleanup DevPod port-forward resources for ${workspaceName}: ${message}`)
+      })
+    })
+
+    const stop = async () => {
+      if (!spawnError && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGTERM')
+        await new Promise<void>(resolve => {
+          const timeout = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) {
+              child.kill('SIGKILL')
+            }
+            resolve()
+          }, 3000)
+
+          child.once('exit', () => {
+            clearTimeout(timeout)
+            resolve()
+          })
+        })
+      }
+
+      await cleanup()
+    }
+
+    return {
+      workspaceName,
+      localPort,
+      targetPort,
+      child,
+      getStderr: () => stderr,
+      isExited: () => spawnError !== null || child.exitCode !== null || child.signalCode !== null,
+      stop,
     }
   }
 

@@ -1,6 +1,7 @@
 import { PrismaService } from '@/database/prisma.service'
 import { CodingAgentSnapshotService } from '@/harness-kanban/coding-agent/coding-agent-snapshot.service'
 import { PgmqService } from '@/pgmq/pgmq.service'
+import { ConfigService } from '@nestjs/config'
 import { HarnessWorkerCodingAgentWorkflowService } from '../coding-agent-workflow.service'
 import { HarnessWorkerDevpodService } from '../devpod.service'
 import { WorkerService } from '../worker.service'
@@ -12,6 +13,7 @@ describe('WorkerService', () => {
   let pgmqService: jest.Mocked<PgmqService>
   let devpodService: jest.Mocked<HarnessWorkerDevpodService>
   let codingAgentWorkflowService: jest.Mocked<HarnessWorkerCodingAgentWorkflowService>
+  let configService: jest.Mocked<ConfigService>
   let readQueueMock: jest.Mock
   let archiveMessageMock: jest.Mock
 
@@ -62,6 +64,9 @@ describe('WorkerService', () => {
       startClaimedIssuePlanning: jest.fn(),
       handleContinuationTrigger: jest.fn(),
     } as unknown as jest.Mocked<HarnessWorkerCodingAgentWorkflowService>
+    configService = {
+      get: jest.fn(),
+    } as unknown as jest.Mocked<ConfigService>
 
     service = new WorkerService(
       prismaService,
@@ -69,6 +74,7 @@ describe('WorkerService', () => {
       codingAgentSnapshotService,
       codingAgentWorkflowService,
       pgmqService,
+      configService,
     )
   })
 

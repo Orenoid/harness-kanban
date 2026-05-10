@@ -2,6 +2,7 @@ import { PrismaService } from '@/database/prisma.service'
 import { PgmqService } from '@/pgmq/pgmq.service'
 import { SystemBotId } from '@/user/constants/user.constants'
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@repo/database'
 import { SystemPropertyId } from '@repo/shared/property/constants'
 import { CodingAgentSnapshotService } from '../coding-agent/coding-agent-snapshot.service'
@@ -11,6 +12,8 @@ import {
   DEFAULT_HARNESS_WORKER_DISPATCH_VISIBILITY_TIMEOUT_SECONDS,
   DEFAULT_HARNESS_WORKER_HEARTBEAT_INTERVAL_MS,
   DEFAULT_HARNESS_WORKER_POLL_INTERVAL_MS,
+  DEFAULT_HARNESS_WORKER_PROXY_HOST,
+  DEFAULT_HARNESS_WORKER_PROXY_PORT,
   getHarnessWorkerDispatchQueueName,
   HARNESS_WORKER_BUSY_STATUS,
   HARNESS_WORKER_IDLE_STATUS,
@@ -45,6 +48,7 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
     private readonly codingAgentSnapshotService: CodingAgentSnapshotService,
     private readonly codingAgentWorkflowService: HarnessWorkerCodingAgentWorkflowService,
     private readonly pgmqService: PgmqService,
+    private readonly configService: ConfigService,
   ) {}
 
   get currentWorkerId(): string | null {
@@ -127,6 +131,7 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
       data: {
         devpod_metadata: Prisma.DbNull,
         issue_id: null,
+        proxy_base_url: this.getProxyBaseUrl(),
         status: HARNESS_WORKER_IDLE_STATUS,
         last_updated_at: new Date(),
       },
@@ -203,6 +208,7 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
         data: {
           devpod_metadata: Prisma.DbNull,
           issue_id: candidate.id,
+          proxy_base_url: this.getProxyBaseUrl(),
           status: HARNESS_WORKER_BUSY_STATUS,
           last_updated_at: now,
         },
@@ -236,6 +242,7 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
       data: {
         devpod_metadata: Prisma.DbNull,
         issue_id: null,
+        proxy_base_url: this.getProxyBaseUrl(),
         status: HARNESS_WORKER_IDLE_STATUS,
         last_updated_at: new Date(),
       },
@@ -258,6 +265,7 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
         where: { id: this.workerId },
         data: {
           issue_id: this.claimedIssueId,
+          proxy_base_url: this.getProxyBaseUrl(),
           status: this.workerStatus,
           last_updated_at: new Date(),
         },
@@ -332,6 +340,22 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
 
     clearInterval(this.heartbeatTimer)
     this.heartbeatTimer = null
+  }
+
+  private getProxyBaseUrl(): string | null {
+    const value = this.configService.get<string>('HARNESS_WORKER_PROXY_BASE_URL')?.trim()
+    if (value && value.length > 0) {
+      return value.replace(/\/$/, '')
+    }
+
+    const configuredPort = this.configService.get<string | number>('HARNESS_WORKER_PROXY_PORT')
+    const port =
+      typeof configuredPort === 'number'
+        ? configuredPort
+        : Number.isFinite(Number.parseInt(configuredPort ?? '', 10))
+          ? Number.parseInt(configuredPort ?? '', 10)
+          : DEFAULT_HARNESS_WORKER_PROXY_PORT
+    return `http://${DEFAULT_HARNESS_WORKER_PROXY_HOST}:${port}`
   }
 
   private async runClaimPollingOnce(): Promise<void> {

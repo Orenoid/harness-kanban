@@ -6,12 +6,14 @@ import { withSentryConfig } from '@sentry/nextjs'
 const appDir = path.dirname(fileURLToPath(import.meta.url))
 const workspaceRoot = path.join(appDir, '../..')
 const nextDistDir = process.env.NEXT_DIST_MODE === 'build' ? '.next-build' : '.next'
+const internalApiBaseUrl = process.env.INTERNAL_API_BASE_URL || process.env.RUNTIME_API_BASE_URL || 'http://localhost:3001'
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Keep dev and production build artifacts isolated so local builds do not
   // corrupt a running `next dev` process in the same workspace.
   distDir: nextDistDir,
+  skipTrailingSlashRedirect: true,
   output: 'standalone',
   outputFileTracingRoot: workspaceRoot,
   transpilePackages: ['@repo/shared'],
@@ -23,6 +25,14 @@ const nextConfig = {
         port: '9000',
       },
     ],
+  },
+  async rewrites() {
+    return [
+      {
+        source: '/vnc/:path*',
+        destination: `${internalApiBaseUrl.replace(/\/$/, '')}/api/v1/vnc/:path*`,
+      },
+    ]
   },
   webpack: (config, { isServer }) => {
     if (isServer) {
