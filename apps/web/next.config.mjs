@@ -13,6 +13,7 @@ const nextConfig = {
   // Keep dev and production build artifacts isolated so local builds do not
   // corrupt a running `next dev` process in the same workspace.
   distDir: nextDistDir,
+  skipTrailingSlashRedirect: true,
   output: 'standalone',
   outputFileTracingRoot: workspaceRoot,
   transpilePackages: ['@repo/shared'],

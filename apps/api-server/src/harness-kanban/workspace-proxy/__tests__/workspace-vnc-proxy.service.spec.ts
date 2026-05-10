@@ -104,6 +104,44 @@ describe('WorkspaceVncProxyService', () => {
     })
   })
 
+  it('injects an issue-scoped base tag into proxied HTML documents', async () => {
+    workerServer = createServer((req, res) => {
+      expect(req.headers['accept-encoding']).toBeUndefined()
+      res.setHeader('content-type', 'text/html')
+      res.end('<!doctype html><html><head><script src="./assets/app.js"></script></head><body></body></html>')
+    })
+    const workerPort = await listen(workerServer)
+    const prismaService = {
+      client: {
+        issue: {
+          findFirst: jest.fn().mockResolvedValue({ id: 404 }),
+        },
+        harness_worker: {
+          findFirst: jest.fn().mockResolvedValue({
+            proxy_base_url: `http://127.0.0.1:${workerPort}`,
+            last_updated_at: new Date(),
+          }),
+        },
+      },
+    } as unknown as jest.Mocked<PrismaService>
+    const configService = {
+      get: jest.fn(),
+    } as unknown as jest.Mocked<ConfigService>
+    const service = new WorkspaceVncProxyService(prismaService, configService)
+
+    apiServer = createServer((req, res) => {
+      void service.handleHttpRequest(req, res)
+    })
+    const apiPort = await listen(apiServer)
+
+    const body = await readUrl(`http://127.0.0.1:${apiPort}/api/v1/vnc/404`)
+
+    expect(body).toContain('<base href="/vnc/404/">')
+    expect(body).toContain('url.pathname === "/vnc/websockets"')
+    expect(body).toContain('const prefix = "/vnc/404/";')
+    expect(body).toContain('<script src="./assets/app.js"></script>')
+  })
+
   it('proxies WebSocket upgrade requests to the owning worker proxy URL', async () => {
     workerServer = createServer()
     workerServer.on('upgrade', (req, socket) => {

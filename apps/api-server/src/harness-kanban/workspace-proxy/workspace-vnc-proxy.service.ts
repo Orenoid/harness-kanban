@@ -53,10 +53,23 @@ export class WorkspaceVncProxyService {
           headers: this.buildProxyRequestHeaders(req.headers, worker.baseUrl.host),
         },
         upstreamRes => {
+          if (this.shouldInjectHtmlBase(upstreamRes.headers)) {
+            const chunks: Buffer[] = []
+            upstreamRes.on('data', chunk => chunks.push(chunk))
+            upstreamRes.on('end', () => {
+              const body = this.injectHtmlBase(Buffer.concat(chunks).toString('utf8'), target.issueId)
+              const headers = this.filterResponseHeaders(upstreamRes.headers)
+              headers['content-length'] = Buffer.byteLength(body).toString()
+              res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.statusMessage, headers)
+              res.end(body)
+            })
+            return
+          }
+
           res.writeHead(
             upstreamRes.statusCode ?? 502,
             upstreamRes.statusMessage,
-            this.filterHeaders(upstreamRes.headers),
+            this.filterResponseHeaders(upstreamRes.headers),
           )
           upstreamRes.pipe(res)
         },
@@ -191,6 +204,7 @@ export class WorkspaceVncProxyService {
     nextHeaders.host = host
     nextHeaders['x-forwarded-host'] = headers.host
     nextHeaders['x-forwarded-prefix'] = '/vnc'
+    delete nextHeaders['accept-encoding']
     return nextHeaders
   }
 
@@ -225,6 +239,61 @@ export class WorkspaceVncProxyService {
     ])
 
     return Object.fromEntries(Object.entries(headers).filter(([key]) => !hopByHop.has(key.toLowerCase())))
+  }
+
+  private filterResponseHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
+    const nextHeaders = this.filterHeaders(headers)
+    delete nextHeaders['content-length']
+    delete nextHeaders['content-encoding']
+    delete nextHeaders.etag
+    return nextHeaders
+  }
+
+  private shouldInjectHtmlBase(headers: IncomingHttpHeaders): boolean {
+    const contentType = headers['content-type']
+    const value = Array.isArray(contentType) ? contentType.join(';') : contentType
+    return typeof value === 'string' && value.toLowerCase().includes('text/html')
+  }
+
+  private injectHtmlBase(body: string, issueId: number): string {
+    if (/<base\s/i.test(body)) {
+      return body
+    }
+
+    const baseTag = [
+      `<base href="/vnc/${issueId}/">`,
+      `<script>${this.buildVncWebSocketPatchScript(issueId)}</script>`,
+    ].join('')
+    if (/<head[^>]*>/i.test(body)) {
+      return body.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`)
+    }
+
+    return `${baseTag}${body}`
+  }
+
+  private buildVncWebSocketPatchScript(issueId: number): string {
+    return [
+      '(() => {',
+      '  const NativeWebSocket = window.WebSocket;',
+      `  const prefix = "/vnc/${issueId}/";`,
+      '  const rewrite = value => {',
+      '    if (typeof value !== "string") return value;',
+      '    try {',
+      '      const url = new URL(value, window.location.href);',
+      '      if (url.pathname === "/vnc/websockets") {',
+      '        url.pathname = `${prefix}websockets`;',
+      '        return url.href;',
+      '      }',
+      '    } catch {}',
+      '    return value;',
+      '  };',
+      '  window.WebSocket = function WebSocket(url, protocols) {',
+      '    return protocols === undefined ? new NativeWebSocket(rewrite(url)) : new NativeWebSocket(rewrite(url), protocols);',
+      '  };',
+      '  window.WebSocket.prototype = NativeWebSocket.prototype;',
+      '  Object.assign(window.WebSocket, NativeWebSocket);',
+      '})();',
+    ].join('')
   }
 
   private rejectUpgrade(socket: Socket, statusCode: number, message: string): void {
