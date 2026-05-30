@@ -389,6 +389,68 @@ describe('IssueService', () => {
     })
   })
 
+  describe('issue property value helpers', () => {
+    it('should return a trimmed string property value for a single issue', async () => {
+      ;(prismaService.client.issue.findFirst as jest.Mock).mockResolvedValue({
+        id: 123,
+        workspace_id: 'workspace-123',
+      })
+      ;(prismaService.client.property_single_value.findMany as jest.Mock).mockResolvedValue([
+        {
+          issue_id: 123,
+          property_id: SystemPropertyId.TITLE,
+          property_type: PropertyType.TITLE,
+          value: '  Issue title  ',
+          number_value: null,
+        },
+      ])
+      ;(prismaService.client.property_multi_value.findMany as jest.Mock).mockResolvedValue([])
+      propertyService.getPropertyDefinitions.mockResolvedValue([
+        { id: SystemPropertyId.TITLE, name: 'Title', type: PropertyType.TITLE },
+      ] as any)
+
+      await expect(service.getIssueStringPropertyValue(123, SystemPropertyId.TITLE)).resolves.toBe('Issue title')
+    })
+
+    it('should return requested property values for multiple issues', async () => {
+      ;(prismaService.client.issue.findMany as jest.Mock).mockResolvedValue([{ id: 1 }, { id: 2 }])
+      ;(prismaService.client.property_single_value.findMany as jest.Mock).mockResolvedValue([
+        {
+          issue_id: 1,
+          property_id: SystemPropertyId.TITLE,
+          property_type: PropertyType.TITLE,
+          value: 'Issue 1',
+          number_value: null,
+        },
+        {
+          issue_id: 1,
+          property_id: SystemPropertyId.STATUS,
+          property_type: PropertyType.STATUS,
+          value: 'todo',
+          number_value: null,
+        },
+        {
+          issue_id: 2,
+          property_id: SystemPropertyId.TITLE,
+          property_type: PropertyType.TITLE,
+          value: 'Issue 2',
+          number_value: null,
+        },
+      ])
+      ;(prismaService.client.property_multi_value.findMany as jest.Mock).mockResolvedValue([])
+      propertyService.getPropertyDefinitions.mockResolvedValue([
+        { id: SystemPropertyId.TITLE, name: 'Title', type: PropertyType.TITLE },
+        { id: SystemPropertyId.STATUS, name: 'Status', type: PropertyType.STATUS },
+      ] as any)
+
+      const result = await service.getIssuePropertyValuesByIds([1, 2], [SystemPropertyId.TITLE])
+
+      expect(result.get(1)?.get(SystemPropertyId.TITLE)).toBe('Issue 1')
+      expect(result.get(1)?.has(SystemPropertyId.STATUS)).toBe(false)
+      expect(result.get(2)?.get(SystemPropertyId.TITLE)).toBe('Issue 2')
+    })
+  })
+
   describe('getIssueStates', () => {
     it('returns assignee and status snapshots for existing issues', async () => {
       ;(prismaService.client.issue.findMany as jest.Mock).mockResolvedValue([{ id: 2 }, { id: 1 }])

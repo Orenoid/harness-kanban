@@ -153,6 +153,8 @@ export class WorkerService implements OnApplicationBootstrap, OnApplicationShutd
     const claim = await this.prisma.client.$transaction(async tx => {
       const now = new Date()
 
+      // TODO: Use IssueService for issue property reads once it supports transaction-scoped locked queue reads.
+      // Direct database access is kept temporarily because this claim must preserve current transaction lock semantics.
       const [candidate] = await tx.$queryRaw<Array<{ id: number; workspace_id: string }>>(Prisma.sql`
         SELECT issue.id, issue.workspace_id
         FROM issue

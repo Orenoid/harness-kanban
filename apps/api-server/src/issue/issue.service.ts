@@ -256,6 +256,44 @@ export class IssueService {
     return this.getIssuesWithValues(orderedIssueIds)
   }
 
+  async getIssuePropertyValue(issueId: number, propertyId: string): Promise<unknown> {
+    const issue = await this.getIssueById(issueId)
+    return issue.propertyValues.find(propertyValue => propertyValue.propertyId === propertyId)?.value
+  }
+
+  async getIssueStringPropertyValue(issueId: number, propertyId: string): Promise<string | null> {
+    const value = await this.getIssuePropertyValue(issueId, propertyId)
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+  }
+
+  async getIssuePropertyValuesByIds(
+    issueIds: number[],
+    propertyIds: string[],
+    workspaceId?: string,
+  ): Promise<Map<number, Map<string, unknown>>> {
+    const valuesByIssueId = new Map<number, Map<string, unknown>>()
+    if (issueIds.length === 0) {
+      return valuesByIssueId
+    }
+
+    const requestedPropertyIds = new Set(propertyIds)
+    const issues = await this.getIssuesByIds(issueIds, workspaceId)
+
+    for (const issue of issues) {
+      const valuesByPropertyId = new Map<string, unknown>()
+
+      for (const propertyValue of issue.propertyValues) {
+        if (requestedPropertyIds.has(propertyValue.propertyId)) {
+          valuesByPropertyId.set(propertyValue.propertyId, propertyValue.value)
+        }
+      }
+
+      valuesByIssueId.set(issue.issueId, valuesByPropertyId)
+    }
+
+    return valuesByIssueId
+  }
+
   // TODO should just use getIssuesByIds
   async getIssueStates(issueIds: number[], workspaceId?: string): Promise<Map<number, IssueStateSnapshot>> {
     if (issueIds.length === 0) {

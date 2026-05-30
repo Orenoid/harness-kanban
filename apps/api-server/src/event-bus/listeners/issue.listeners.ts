@@ -50,6 +50,8 @@ export class IssueEventListeners {
       return
     }
 
+    // TODO: Use IssueService for issue property reads once it accepts transaction clients.
+    // Direct database access is kept temporarily because this sync must read within the current transaction.
     const properties = await tx.property.findMany({
       where: {
         type: { notIn: CALCULATED_PROPERTY_TYPES },

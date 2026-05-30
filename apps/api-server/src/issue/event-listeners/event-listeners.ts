@@ -2,6 +2,7 @@ import { PrismaService } from '@/database/prisma.service'
 import { ISSUE_EVENTS } from '@/event-bus/constants/event.constants'
 import { OnTxEvent } from '@/event-bus/decorators/tx-event.decorator'
 import { IssueCreatedEvent, IssueUpdatedEvent, TxEventWrapper } from '@/event-bus/types/event.types'
+import { IssueService } from '@/issue/issue.service'
 import { Injectable, Logger } from '@nestjs/common'
 import { OnEvent } from '@nestjs/event-emitter'
 import {
@@ -17,7 +18,10 @@ import type { Prisma } from '@repo/database'
 export class IssueEventListeners {
   private readonly logger = new Logger(IssueEventListeners.name)
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly issueService: IssueService,
+  ) {}
 
   @OnEvent(ISSUE_EVENTS.ISSUE_CREATED)
   async subscribeOnIssueCreated(event: IssueCreatedEvent): Promise<void> {
@@ -61,6 +65,8 @@ export class IssueEventListeners {
     }
 
     try {
+      // TODO: Use IssueService for issue property reads once it supports transaction-scoped reads.
+      // Direct database access is kept temporarily because this listener runs inside the current transaction.
       const assigneeId = await event.tx.property_single_value
         .findFirst({
           where: {
@@ -124,25 +130,17 @@ export class IssueEventListeners {
       return new Map()
     }
 
-    const assigneeRows = await this.prisma.client.property_single_value.findMany({
-      where: {
-        issue_id: { in: issueIds },
-        property_id: SystemPropertyId.ASSIGNEE,
-        deleted_at: null,
-      },
-      select: {
-        issue_id: true,
-        value: true,
-      },
-    })
+    const valuesByIssueId = await this.issueService.getIssuePropertyValuesByIds(issueIds, [SystemPropertyId.ASSIGNEE])
 
-    return new Map(
-      assigneeRows
-        .filter(
-          (row): row is { issue_id: number; value: string } => typeof row.value === 'string' && row.value.length > 0,
-        )
-        .map(row => [row.issue_id, row.value]),
-    )
+    const assigneeIdsByIssueId = new Map<number, string>()
+    for (const [issueId, valuesByPropertyId] of valuesByIssueId.entries()) {
+      const assigneeId = valuesByPropertyId.get(SystemPropertyId.ASSIGNEE)
+      if (typeof assigneeId === 'string' && assigneeId.trim().length > 0) {
+        assigneeIdsByIssueId.set(issueId, assigneeId.trim())
+      }
+    }
+
+    return assigneeIdsByIssueId
   }
 }
 
@@ -155,6 +153,8 @@ const syncPropertyValuesToIssue = async (tx: Prisma.TransactionClient, issueIds:
     return
   }
 
+  // TODO: Use IssueService for issue property reads once it accepts transaction clients.
+  // Direct database access is kept temporarily because this sync must read within the current transaction.
   // get all non-calculated property definitions
   const properties = await tx.property.findMany({
     where: {

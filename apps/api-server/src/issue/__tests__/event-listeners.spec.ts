@@ -1,11 +1,13 @@
 import { PrismaService } from '@/database/prisma.service'
 import { IssueCreatedEvent, IssueUpdatedEvent, TxEventWrapper } from '@/event-bus/types/event.types'
+import { IssueService } from '@/issue/issue.service'
 import { SystemPropertyId } from '@repo/shared/property/constants'
 import { IssueEventListeners } from '../event-listeners/event-listeners'
 
 describe('IssueEventListeners', () => {
   let listeners: IssueEventListeners
   let prismaService: jest.Mocked<PrismaService>
+  let issueService: jest.Mocked<IssueService>
   let tx: {
     property_single_value: {
       findFirst: jest.Mock
@@ -19,14 +21,14 @@ describe('IssueEventListeners', () => {
   beforeEach(() => {
     prismaService = {
       client: {
-        property_single_value: {
-          findMany: jest.fn(),
-        },
         subscription: {
           createMany: jest.fn(),
         },
       },
     } as unknown as jest.Mocked<PrismaService>
+    issueService = {
+      getIssuePropertyValuesByIds: jest.fn(),
+    } as unknown as jest.Mocked<IssueService>
 
     tx = {
       property_single_value: {
@@ -38,7 +40,7 @@ describe('IssueEventListeners', () => {
       },
     }
 
-    listeners = new IssueEventListeners(prismaService)
+    listeners = new IssueEventListeners(prismaService, issueService)
     jest.clearAllMocks()
   })
 
@@ -54,26 +56,13 @@ describe('IssueEventListeners', () => {
         ],
       }
 
-      ;(prismaService.client.property_single_value.findMany as jest.Mock).mockResolvedValue([
-        {
-          issue_id: 101,
-          value: 'assignee-1',
-        },
-      ])
+      issueService.getIssuePropertyValuesByIds.mockResolvedValue(
+        new Map([[101, new Map([[SystemPropertyId.ASSIGNEE, 'assignee-1']])]]),
+      )
 
       await listeners.subscribeOnIssueCreated(event)
 
-      expect(prismaService.client.property_single_value.findMany).toHaveBeenCalledWith({
-        where: {
-          issue_id: { in: [101] },
-          property_id: SystemPropertyId.ASSIGNEE,
-          deleted_at: null,
-        },
-        select: {
-          issue_id: true,
-          value: true,
-        },
-      })
+      expect(issueService.getIssuePropertyValuesByIds).toHaveBeenCalledWith([101], [SystemPropertyId.ASSIGNEE])
       expect(prismaService.client.subscription.createMany).toHaveBeenCalledWith({
         data: [
           {
@@ -100,7 +89,7 @@ describe('IssueEventListeners', () => {
         ],
       }
 
-      ;(prismaService.client.property_single_value.findMany as jest.Mock).mockResolvedValue([])
+      issueService.getIssuePropertyValuesByIds.mockResolvedValue(new Map())
 
       await listeners.subscribeOnIssueCreated(event)
 
@@ -126,12 +115,9 @@ describe('IssueEventListeners', () => {
         ],
       }
 
-      ;(prismaService.client.property_single_value.findMany as jest.Mock).mockResolvedValue([
-        {
-          issue_id: 101,
-          value: 'same-user',
-        },
-      ])
+      issueService.getIssuePropertyValuesByIds.mockResolvedValue(
+        new Map([[101, new Map([[SystemPropertyId.ASSIGNEE, 'same-user']])]]),
+      )
 
       await listeners.subscribeOnIssueCreated(event)
 
