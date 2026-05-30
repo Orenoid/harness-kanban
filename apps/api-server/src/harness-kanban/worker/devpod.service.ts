@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { PrismaService } from '@/database/prisma.service'
 import { GithubService } from '@/github/github.service'
 import { CodingAgentSnapshotService } from '@/harness-kanban/coding-agent/coding-agent-snapshot.service'
+import { IssueService } from '@/issue/issue.service'
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma } from '@repo/database'
@@ -173,6 +174,7 @@ export class HarnessWorkerDevpodService {
     private readonly codingAgentSnapshotService: CodingAgentSnapshotService,
     private readonly codingAgentProviderRegistry: HarnessWorkerCodingAgentProviderRegistry,
     private readonly githubService: GithubService,
+    private readonly issueService: IssueService,
   ) {}
 
   getWorkspaceNameForIssue(issueId: number): string {
@@ -402,19 +404,7 @@ export class HarnessWorkerDevpodService {
     issueId: number,
     workspaceId: string,
   ): Promise<IssueProjectRepository | null> {
-    const projectBinding = await this.prisma.client.property_single_value.findFirst({
-      where: {
-        issue_id: issueId,
-        property_id: SystemPropertyId.PROJECT,
-        deleted_at: null,
-        value: { not: null },
-      },
-      select: {
-        value: true,
-      },
-    })
-
-    const projectId = projectBinding?.value?.trim()
+    const projectId = await this.issueService.getIssueStringPropertyValue(issueId, SystemPropertyId.PROJECT)
     if (!projectId) {
       return null
     }

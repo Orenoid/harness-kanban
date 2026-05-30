@@ -1,4 +1,5 @@
 import { PrismaService } from '@/database/prisma.service'
+import { IssueService } from '@/issue/issue.service'
 import { NotificationService } from '@/notification/notification.service'
 import { UserService } from '@/user/user.service'
 import { IssueNotificationEventListeners } from '../event-listeners/notification.event-listeners'
@@ -11,6 +12,7 @@ describe('IssueNotificationEventListeners', () => {
       {} as jest.Mocked<PrismaService>,
       {} as jest.Mocked<UserService>,
       {} as jest.Mocked<NotificationService>,
+      {} as jest.Mocked<IssueService>,
     )
   })
 

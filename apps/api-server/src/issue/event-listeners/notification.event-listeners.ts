@@ -1,6 +1,7 @@
 import { PrismaService } from '@/database/prisma.service'
 import { ISSUE_EVENTS } from '@/event-bus/constants/event.constants'
 import { CommentCreatedEvent, IssueDeletedEvent, IssueUpdatedEvent } from '@/event-bus/types/event.types'
+import { IssueService } from '@/issue/issue.service'
 import { jsonContentToMarkdown } from '@/lib/utils/markdown'
 import { NotificationService } from '@/notification/notification.service'
 import { UserService } from '@/user/user.service'
@@ -25,6 +26,7 @@ export class IssueNotificationEventListeners {
     private readonly prisma: PrismaService,
     private readonly userService: UserService,
     private readonly notificationService: NotificationService,
+    private readonly issueService: IssueService,
   ) {}
 
   @OnEvent(ISSUE_EVENTS.ISSUE_UPDATED)
@@ -149,19 +151,11 @@ export class IssueNotificationEventListeners {
   }
 
   private async loadIssueReference(issueId: number): Promise<NotificationIssueReference> {
-    const titleRecord = await this.prisma.client.property_single_value.findFirst({
-      where: {
-        issue_id: issueId,
-        property_id: SystemPropertyId.TITLE,
-      },
-      select: {
-        value: true,
-      },
-    })
+    const title = await this.issueService.getIssueStringPropertyValue(issueId, SystemPropertyId.TITLE)
 
     return {
       issueId,
-      title: titleRecord?.value || `Issue #${issueId}`,
+      title: title || `Issue #${issueId}`,
     }
   }
 

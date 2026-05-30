@@ -1438,18 +1438,7 @@ export class HarnessWorkerCodingAgentWorkflowService {
   }
 
   private async loadIssueProjectValidationCommands(issueId: number, workspaceId: string): Promise<string[]> {
-    const projectBinding = await this.prisma.client.property_single_value.findFirst({
-      where: {
-        issue_id: issueId,
-        property_id: SystemPropertyId.PROJECT,
-        deleted_at: null,
-        value: { not: null },
-      },
-      select: {
-        value: true,
-      },
-    })
-    const projectId = projectBinding?.value?.trim()
+    const projectId = await this.issueService.getIssueStringPropertyValue(issueId, SystemPropertyId.PROJECT)
     if (!projectId) {
       return []
     }
@@ -1611,19 +1600,10 @@ export class HarnessWorkerCodingAgentWorkflowService {
       return preferredAssigneeId
     }
 
-    const reporterRecord = await this.prisma.client.property_single_value.findFirst({
-      where: {
-        issue_id: issueId,
-        property_id: SystemPropertyId.REPORTER,
-        deleted_at: null,
-      },
-      select: {
-        value: true,
-      },
-    })
+    const reporterId = await this.issueService.getIssueStringPropertyValue(issueId, SystemPropertyId.REPORTER)
 
-    if (this.isHumanUserId(reporterRecord?.value)) {
-      return reporterRecord.value
+    if (this.isHumanUserId(reporterId)) {
+      return reporterId
     }
 
     const fallbackUser = await this.prisma.client.user.findFirst({
@@ -1651,23 +1631,14 @@ export class HarnessWorkerCodingAgentWorkflowService {
   }
 
   private async loadIssueSummary(issueId: number): Promise<{ createdBy: string; title: string }> {
-    const [issueRecord, titleRecord] = await Promise.all([
+    const [issueRecord, title] = await Promise.all([
       this.prisma.client.issue.findUnique({
         where: { id: issueId },
         select: {
           created_by: true,
         },
       }),
-      this.prisma.client.property_single_value.findFirst({
-        where: {
-          issue_id: issueId,
-          property_id: SystemPropertyId.TITLE,
-          deleted_at: null,
-        },
-        select: {
-          value: true,
-        },
-      }),
+      this.issueService.getIssueStringPropertyValue(issueId, SystemPropertyId.TITLE),
     ])
 
     if (!issueRecord) {
@@ -1676,7 +1647,7 @@ export class HarnessWorkerCodingAgentWorkflowService {
 
     return {
       createdBy: issueRecord.created_by,
-      title: titleRecord?.value?.trim() || `Issue #${issueId}`,
+      title: title || `Issue #${issueId}`,
     }
   }
 

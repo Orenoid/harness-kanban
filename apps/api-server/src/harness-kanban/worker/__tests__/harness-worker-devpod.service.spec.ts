@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { PrismaService } from '@/database/prisma.service'
 import { GithubService } from '@/github/github.service'
 import { CodingAgentSnapshotService } from '@/harness-kanban/coding-agent/coding-agent-snapshot.service'
+import { IssueService } from '@/issue/issue.service'
 import { ConfigService } from '@nestjs/config'
 import { HarnessWorkerDevpodService } from '../devpod.service'
 import { HarnessWorkerCodingAgentProviderRegistry } from '../providers/coding-agent-provider.registry'
@@ -15,9 +16,9 @@ describe('HarnessWorkerDevpodService', () => {
   let configService: jest.Mocked<ConfigService>
   let codingAgentSnapshotService: jest.Mocked<CodingAgentSnapshotService>
   let githubService: jest.Mocked<GithubService>
+  let issueService: jest.Mocked<IssueService>
   let providerRegistry: jest.Mocked<HarnessWorkerCodingAgentProviderRegistry>
   let toolchainService: jest.Mocked<HarnessWorkerToolchainService>
-  let findProjectBindingMock: jest.Mock
   let findProjectMock: jest.Mock
   let updateWorkerMock: jest.Mock
 
@@ -31,6 +32,9 @@ describe('HarnessWorkerDevpodService', () => {
     githubService = {
       getTokenForWorkspace: jest.fn(),
     } as unknown as jest.Mocked<GithubService>
+    issueService = {
+      getIssueStringPropertyValue: jest.fn(),
+    } as unknown as jest.Mocked<IssueService>
     toolchainService = {
       resolveCodexToolchainArtifact: jest.fn(),
       resolveToolchainArtifact: jest.fn(),
@@ -39,15 +43,11 @@ describe('HarnessWorkerDevpodService', () => {
       getProvider: jest.fn().mockReturnValue(new HarnessWorkerCodexProvider(toolchainService)),
     } as unknown as jest.Mocked<HarnessWorkerCodingAgentProviderRegistry>
 
-    findProjectBindingMock = jest.fn()
     findProjectMock = jest.fn()
     updateWorkerMock = jest.fn().mockResolvedValue({ count: 1 })
 
     const prismaService = {
       client: {
-        property_single_value: {
-          findFirst: findProjectBindingMock,
-        },
         project: {
           findFirst: findProjectMock,
         },
@@ -63,18 +63,19 @@ describe('HarnessWorkerDevpodService', () => {
       codingAgentSnapshotService,
       providerRegistry,
       githubService,
+      issueService,
     )
   })
 
   it('returns null when the issue is not bound to a project', async () => {
-    findProjectBindingMock.mockResolvedValue(null)
+    issueService.getIssueStringPropertyValue.mockResolvedValue(null)
 
     await expect(service.createWorkspaceForIssue(101, 'workspace-1')).resolves.toBeNull()
     expect(findProjectMock).not.toHaveBeenCalled()
   })
 
   it('returns null when the workspace GitHub token is missing', async () => {
-    findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
+    issueService.getIssueStringPropertyValue.mockResolvedValue('project-1')
     findProjectMock.mockResolvedValue({
       env_config: null,
       github_repo_url: 'https://github.com/harness-kanban/payments-api',
@@ -87,7 +88,7 @@ describe('HarnessWorkerDevpodService', () => {
   })
 
   it('returns null when no coding agent is configured', async () => {
-    findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
+    issueService.getIssueStringPropertyValue.mockResolvedValue('project-1')
     findProjectMock.mockResolvedValue({
       env_config: null,
       github_repo_url: 'https://github.com/harness-kanban/payments-api',
@@ -135,7 +136,7 @@ describe('HarnessWorkerDevpodService', () => {
     const codexAuthJson = '{"accessToken":"codex-token","provider":"openai"}'
     const codexAuthJsonBase64 = Buffer.from(codexAuthJson, 'utf8').toString('base64')
 
-    findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
+    issueService.getIssueStringPropertyValue.mockResolvedValue('project-1')
     findProjectMock.mockResolvedValue({
       env_config: {
         API_BASE_URL: 'https://api.example.com',
@@ -511,7 +512,7 @@ describe('HarnessWorkerDevpodService', () => {
   })
 
   it('skips auth.json seeding when the Codex coding agent uses API key auth', async () => {
-    findProjectBindingMock.mockResolvedValue({ value: 'project-1' })
+    issueService.getIssueStringPropertyValue.mockResolvedValue('project-1')
     findProjectMock.mockResolvedValue({
       env_config: null,
       github_repo_url: 'https://github.com/harness-kanban/payments-api',

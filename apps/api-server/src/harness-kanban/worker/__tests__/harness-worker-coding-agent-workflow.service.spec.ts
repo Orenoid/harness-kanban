@@ -31,11 +31,6 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
             workspace_id: 'workspace-1',
           }),
         },
-        property_single_value: {
-          findFirst: jest.fn().mockResolvedValue({
-            value: 'Planning workflow',
-          }),
-        },
         harness_worker: {
           findFirst: jest.fn().mockResolvedValue({
             devpod_metadata: {
@@ -114,6 +109,21 @@ describe('HarnessWorkerCodingAgentWorkflowService', () => {
           { propertyId: SystemPropertyId.PRIORITY, value: 'high' },
           { propertyId: SystemPropertyId.PROJECT, value: 'project-1' },
         ],
+      }),
+      getIssueStringPropertyValue: jest.fn().mockImplementation(async (_issueId: number, propertyId: string) => {
+        if (propertyId === SystemPropertyId.TITLE) {
+          return 'Planning workflow'
+        }
+
+        if (propertyId === SystemPropertyId.PROJECT) {
+          return 'project-1'
+        }
+
+        if (propertyId === SystemPropertyId.REPORTER) {
+          return 'user-2'
+        }
+
+        return null
       }),
       updateIssue: jest.fn().mockResolvedValue({
         success: true,
